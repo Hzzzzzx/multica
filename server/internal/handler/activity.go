@@ -55,7 +55,12 @@ type TimelineResponse struct {
 }
 
 const (
-	timelineDefaultLimit = 50
+	// timelineDefaultLimit governs the per-page COMMENT budget. Activities are
+	// fetched at the same per-call cap but do not consume the budget (#1857) —
+	// they decorate the comment stream. Without that split, an issue with
+	// sparse comments but dense activity (agent runs, status flips) triggered
+	// "show older" prematurely and felt like comments had vanished.
+	timelineDefaultLimit = 30
 	timelineMaxLimit     = 100
 )
 
@@ -190,7 +195,10 @@ func (h *Handler) listTimelineLegacy(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	entries := h.mergeTimelineDesc(r, comments, activities, legacyTimelineCap)
+	entries := h.mergeTimelineDesc(r, comments, activities)
+	if len(entries) > legacyTimelineCap {
+		entries = entries[:legacyTimelineCap]
+	}
 	// Old contract: ASC (oldest → newest).
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
@@ -203,10 +211,11 @@ func (h *Handler) listTimelineLegacy(w http.ResponseWriter, r *http.Request, iss
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// listTimelineLatest fetches the most recent <limit> entries (no cursor).
-// Both tables are queried for <limit> rows each; the merge picks the top
-// <limit> overall. Any item the merge didn't include cannot rank higher than
-// the worst kept item in either pool, so this is exact, not approximate.
+// listTimelineLatest fetches the latest page (no cursor). <limit> is the
+// COMMENT page size (#1857); activity rows ride along at the same per-call
+// SQL cap but do not consume the page budget — has_more_before is gated on
+// comments alone, so a chatty agent's status flips can't push real comments
+// off-page.
 func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, issue db.Issue, limit int) {
 	ctx := r.Context()
 	comments, err := h.Queries.ListCommentsLatest(ctx, db.ListCommentsLatestParams{
@@ -224,9 +233,9 @@ func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, iss
 		return
 	}
 
-	entries := h.mergeTimelineDesc(r, comments, activities, limit)
+	entries := h.mergeTimelineDesc(r, comments, activities)
 	resp := TimelineResponse{Entries: entries}
-	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreBefore = hasMoreCommentsBeyond(len(comments), limit)
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -263,12 +272,12 @@ func (h *Handler) listTimelineBefore(w http.ResponseWriter, r *http.Request, iss
 		return
 	}
 
-	entries := h.mergeTimelineDesc(r, comments, activities, limit)
+	entries := h.mergeTimelineDesc(r, comments, activities)
 	resp := TimelineResponse{
 		Entries:      entries,
 		HasMoreAfter: true, // we're paging older from a known position, so newer exists
 	}
-	resp.HasMoreBefore = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreBefore = hasMoreCommentsBeyond(len(comments), limit)
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -304,12 +313,13 @@ func (h *Handler) listTimelineAfter(w http.ResponseWriter, r *http.Request, issu
 		return
 	}
 
-	// Both queries returned ASC (older→newer). Merge ASC, take the limit
-	// closest to the cursor (i.e. the oldest of the "after" set), then
-	// reverse to DESC for the response.
-	entries := h.mergeTimelineAscThenReverse(r, comments, activities, limit)
+	// Both queries returned ASC (older→newer); reverse to DESC for the
+	// response. No outer truncation: each pool is already capped by the SQL
+	// LIMIT, and dropping rows here would re-introduce the comments-pushed-
+	// off-page bug (#1857).
+	entries := h.mergeTimelineAscThenReverse(r, comments, activities)
 	resp := TimelineResponse{Entries: entries, HasMoreBefore: true}
-	resp.HasMoreAfter = hasMoreBeyond(len(comments), len(activities), len(entries), limit)
+	resp.HasMoreAfter = hasMoreCommentsBeyond(len(comments), limit)
 	if resp.HasMoreAfter && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
 		resp.PrevCursor = &c
@@ -381,7 +391,7 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	olderEntries := h.mergeTimelineDesc(r, olderComments, olderActivities, beforeLimit)
+	olderEntries := h.mergeTimelineDesc(r, olderComments, olderActivities)
 
 	// Newer half: keyset After (anchor exclusive).
 	newerComments, err := h.Queries.ListCommentsAfter(ctx, db.ListCommentsAfterParams{
@@ -399,7 +409,7 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
-	newerEntries := h.mergeTimelineAscThenReverse(r, newerComments, newerActivities, afterLimit)
+	newerEntries := h.mergeTimelineAscThenReverse(r, newerComments, newerActivities)
 
 	// Build the anchor entry inline using the existing single-entry path.
 	anchorEntry, ok := h.fetchSingleEntry(r, issue, target)
@@ -417,8 +427,8 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 
 	resp := TimelineResponse{
 		Entries:       entries,
-		HasMoreBefore: hasMoreBeyond(len(olderComments), len(olderActivities), len(olderEntries), beforeLimit),
-		HasMoreAfter:  hasMoreBeyond(len(newerComments), len(newerActivities), len(newerEntries), afterLimit),
+		HasMoreBefore: hasMoreCommentsBeyond(len(olderComments), beforeLimit),
+		HasMoreAfter:  hasMoreCommentsBeyond(len(newerComments), afterLimit),
 		TargetIndex:   &targetIdx,
 	}
 	if resp.HasMoreBefore {
@@ -449,28 +459,25 @@ func (h *Handler) fetchSingleEntry(r *http.Request, issue db.Issue, id pgtype.UU
 	return TimelineEntry{}, false
 }
 
-// hasMoreBeyond reports whether entries exist beyond the page on the side the
-// caller is paginating away from (older for "before", newer for "after").
-//
-// Three independent signals, any of which means "more rows exist":
-//  1. comments >= limit — the comments query was capped, DB has more.
-//  2. activities >= limit — the activities query was capped, DB has more.
-//  3. comments+activities > entries — the in-memory merge dropped rows that
-//     could not all fit in the page (#2192). This is the case the original
-//     formula missed, which made older comments unreachable when neither
-//     individual query hit the limit but their combined total exceeded it.
-func hasMoreBeyond(comments, activities, entries, limit int) bool {
+// hasMoreCommentsBeyond reports whether more COMMENTS exist beyond the page on
+// the side the caller is paginating away from (older for "before", newer for
+// "after"). Activity rows do not gate pagination (#1857): a dense activity
+// stream from agent runs / status flips would otherwise trigger "show older"
+// on issues with only a handful of real comments, making the discussion look
+// like it had disappeared.
+func hasMoreCommentsBeyond(comments, limit int) bool {
 	if limit <= 0 {
 		return false
 	}
-	return comments >= limit || activities >= limit || comments+activities > entries
+	return comments >= limit
 }
 
-// mergeTimelineDesc takes comments + activities sorted DESC by (created_at, id)
-// and returns the top <limit> merged entries, also DESC. Items the merge does
-// not include cannot rank higher than the worst kept item in either pool, so
-// the result is exact.
-func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, activities []db.ActivityLog, limit int) []TimelineEntry {
+// mergeTimelineDesc returns comments + activities merged DESC by
+// (created_at, id). No truncation: both pools are individually capped at the
+// SQL layer, and dropping rows here would re-introduce the bug where dense
+// activity pushed real comments off-page (#1857). Callers that need an outer
+// safety cap (legacy compat path) apply it themselves.
+func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, activities []db.ActivityLog) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(comments)+len(activities))
 	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
@@ -482,17 +489,14 @@ func (h *Handler) mergeTimelineDesc(r *http.Request, comments []db.Comment, acti
 		}
 		return out[i].ID > out[j].ID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	return out
 }
 
 // mergeTimelineAscThenReverse takes comments + activities sorted ASC by
-// (created_at, id) — the natural shape of an "after" keyset query — picks
-// the <limit> closest to the cursor (i.e. earliest of the after-set), and
-// returns them DESC for response consistency.
-func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Comment, activities []db.ActivityLog, limit int) []TimelineEntry {
+// (created_at, id) — the natural shape of an "after" keyset query — and
+// returns them DESC for response consistency. No truncation, same reason as
+// mergeTimelineDesc.
+func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Comment, activities []db.ActivityLog) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(comments)+len(activities))
 	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
@@ -504,9 +508,6 @@ func (h *Handler) mergeTimelineAscThenReverse(r *http.Request, comments []db.Com
 		}
 		return out[i].ID < out[j].ID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	// Reverse to DESC.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]

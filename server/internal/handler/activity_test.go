@@ -92,19 +92,22 @@ func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) 
 
 func TestListTimeline_DefaultLatestPage(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Latest page test")
-	seedTimelineEntries(t, issueID, 60, 60) // 120 total; default limit is 50
+	// 80 comments triggers the comment overflow signal; activities are
+	// excluded so the per-page count is unambiguous (#1857: activities don't
+	// gate has_more_before).
+	seedTimelineEntries(t, issueID, 80, 0)
 
 	// Empty query string is now reserved for the legacy compat path; new
 	// client always sends ?limit=... so emulate that here.
-	resp, code := fetchTimeline(t, issueID, "limit=50")
+	resp, code := fetchTimeline(t, issueID, "limit=30")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
-	if len(resp.Entries) != 50 {
-		t.Fatalf("expected 50 entries on default page, got %d", len(resp.Entries))
+	if len(resp.Entries) != 30 {
+		t.Fatalf("expected 30 entries on default page, got %d", len(resp.Entries))
 	}
 	if !resp.HasMoreBefore {
-		t.Fatalf("expected has_more_before=true with 120 total entries")
+		t.Fatalf("expected has_more_before=true with 80 comments")
 	}
 	if resp.HasMoreAfter {
 		t.Fatalf("latest page must report has_more_after=false")
@@ -121,7 +124,9 @@ func TestListTimeline_DefaultLatestPage(t *testing.T) {
 
 func TestListTimeline_BeforeCursorWalksOlder(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Before cursor test")
-	seedTimelineEntries(t, issueID, 30, 30) // 60 total
+	// Comments-only so the page-count assertions are stable. limit=20 →
+	// 20 comments per page, no activities to inflate the totals.
+	seedTimelineEntries(t, issueID, 60, 0)
 
 	first, _ := fetchTimeline(t, issueID, "limit=20")
 	if len(first.Entries) != 20 {
@@ -152,7 +157,9 @@ func TestListTimeline_BeforeCursorWalksOlder(t *testing.T) {
 
 func TestListTimeline_AfterCursorWalksNewer(t *testing.T) {
 	issueID := createIssueForTimeline(t, "After cursor test")
-	seedTimelineEntries(t, issueID, 30, 30)
+	// Comments-only seed so cursor walking depends on comment overflow alone
+	// (#1857: activities don't gate has_more_after either).
+	seedTimelineEntries(t, issueID, 60, 0)
 
 	first, _ := fetchTimeline(t, issueID, "limit=20")
 	if first.NextCursor == nil {
@@ -331,98 +338,67 @@ func TestListTimeline_LegacyShapeForPreCursorClients(t *testing.T) {
 	}
 }
 
-// TestHasMoreBeyond covers the truth table for the page-boundary helper. The
-// 8 rows enumerate every meaningful combination of (per-table cap hit) ×
-// (merge truncation), including the #2192 shape (case "merge truncation
-// without per-table cap") which the original formula missed.
-func TestHasMoreBeyond(t *testing.T) {
+// TestHasMoreCommentsBeyond pins the truth table for the page-boundary helper.
+// Activities deliberately don't appear: #1857 reverted them from being a
+// pagination signal. Only the comment count and limit decide whether more
+// rows exist beyond the page.
+func TestHasMoreCommentsBeyond(t *testing.T) {
 	cases := []struct {
-		name                                 string
-		comments, activities, entries, limit int
-		want                                 bool
+		name            string
+		comments, limit int
+		want            bool
 	}{
-		{"empty page", 0, 0, 0, 50, false},
-		{"partial page no truncation", 5, 3, 8, 50, false},
-		{"comments hit limit only", 50, 3, 50, 50, true},
-		{"activities hit limit only", 3, 50, 50, 50, true},
-		{"both hit limit", 50, 50, 50, 50, true},
-		// #2192: 48 comments + 49 activities, neither alone hits 50, merge
-		// truncated 47 rows. Old formula reported false; new reports true.
-		{"#2192 merge truncation", 48, 49, 50, 50, true},
-		{"exact-fit merge no truncation", 30, 20, 50, 50, false},
-		{"limit zero rejects", 100, 100, 0, 0, false},
+		{"empty page", 0, 30, false},
+		{"partial page", 5, 30, false},
+		{"comments hit limit", 30, 30, true},
+		{"comments well over limit", 100, 30, true},
+		{"limit zero rejects", 100, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hasMoreBeyond(tc.comments, tc.activities, tc.entries, tc.limit); got != tc.want {
-				t.Fatalf("hasMoreBeyond(c=%d, a=%d, e=%d, lim=%d) = %v, want %v",
-					tc.comments, tc.activities, tc.entries, tc.limit, got, tc.want)
+			if got := hasMoreCommentsBeyond(tc.comments, tc.limit); got != tc.want {
+				t.Fatalf("hasMoreCommentsBeyond(c=%d, lim=%d) = %v, want %v",
+					tc.comments, tc.limit, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestListTimeline_MergeTruncationKeepsOlderReachable reproduces #2192 against
-// real DB rows: 48 comments dated older than 49 activities, default limit 50.
-// Pre-fix, the latest page reported has_more_before=false and the 47 older
-// comments were unreachable. Post-fix, the cursor + has_more_before flag let
-// the client walk to page 2 and recover them.
-func TestListTimeline_MergeTruncationKeepsOlderReachable(t *testing.T) {
-	issueID := createIssueForTimeline(t, "2192 merge truncation regression")
-	ctx := context.Background()
+// TestListTimeline_DenseActivityDoesNotHideComments reproduces #1857: an issue
+// with sparse comments but dense activity (status flips, agent runs) used to
+// trigger has_more_before because activities consumed the same page budget.
+// Real comments would get pushed off the visible page and users would think
+// the discussion had vanished. Post-fix, has_more_before is gated on comments
+// alone, so the entire conversation stays visible without "show older".
+func TestListTimeline_DenseActivityDoesNotHideComments(t *testing.T) {
+	issueID := createIssueForTimeline(t, "1857 sparse comments dense activity")
 
-	// 48 older comments, then 49 newer activities. The seedTimelineEntries
-	// helper inserts comments first (older block) then activities (newer
-	// block) — exactly the #2192 shape.
-	commentIDs, _ := seedTimelineEntries(t, issueID, 48, 49)
+	// 10 comments — well under the 30-comment page budget — paired with 60
+	// activities (an agent that flipped status / completed runs many times).
+	// seedTimelineEntries inserts comments first (older block), then activities
+	// (newer block), matching the typical "issue created → discussion → many
+	// agent runs" timeline shape.
+	commentIDs, _ := seedTimelineEntries(t, issueID, 10, 60)
 
-	first, code := fetchTimeline(t, issueID, "limit=50")
+	resp, code := fetchTimeline(t, issueID, "limit=30")
 	if code != http.StatusOK {
-		t.Fatalf("first page: expected 200, got %d", code)
+		t.Fatalf("expected 200, got %d", code)
 	}
-	if len(first.Entries) != 50 {
-		t.Fatalf("first page should be full at 50 entries, got %d", len(first.Entries))
-	}
-	if !first.HasMoreBefore {
-		t.Fatalf("first page must report has_more_before=true (47 older comments dropped by merge)")
-	}
-	if first.NextCursor == nil {
-		t.Fatalf("first page must emit next_cursor when has_more_before=true")
+	if resp.HasMoreBefore {
+		t.Fatalf("has_more_before must be false when comments < limit, even if activities are dense (#1857)")
 	}
 
-	// Page 2: walk older. Must surface the 47 older comments that the merge
-	// dropped on page 1.
-	second, code := fetchTimeline(t, issueID, "limit=50&before="+*first.NextCursor)
-	if code != http.StatusOK {
-		t.Fatalf("second page: expected 200, got %d", code)
-	}
-	if len(second.Entries) != 47 {
-		t.Fatalf("second page should return the 47 dropped older comments, got %d", len(second.Entries))
-	}
-
-	// Spot-check: every entry on page 2 must be a comment (the activities
-	// block was strictly newer).
-	for i, e := range second.Entries {
-		if e.Type != "comment" {
-			t.Fatalf("page 2 entry %d: expected comment, got %s", i, e.Type)
+	// Every seeded comment must be on the first page — none should be hidden
+	// behind a "show older" gate on an issue with so few comments.
+	commentSeen := map[string]bool{}
+	for _, e := range resp.Entries {
+		if e.Type == "comment" {
+			commentSeen[e.ID] = true
 		}
 	}
-
-	// Spot-check: page 2 must include the very oldest comment we seeded —
-	// otherwise the cursor walk lost data, which is precisely what #2192
-	// was about.
-	oldestSeeded := commentIDs[0]
-	found := false
-	for _, e := range second.Entries {
-		if e.ID == oldestSeeded {
-			found = true
-			break
+	for _, id := range commentIDs {
+		if !commentSeen[id] {
+			t.Fatalf("comment %s missing from latest page — #1857 regressed", id)
 		}
 	}
-	if !found {
-		t.Fatalf("page 2 missing the oldest seeded comment %s — cursor walk lost data", oldestSeeded)
-	}
-
-	// Sanity: don't leak DB internals if something later changes the helper.
-	_ = ctx
 }
