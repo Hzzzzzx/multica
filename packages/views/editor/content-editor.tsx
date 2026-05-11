@@ -38,6 +38,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -67,6 +68,21 @@ function stripBlobUrls(md: string): string {
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolution returned by `onExternalConflict` to tell ContentEditor how to
+ * reconcile a conflict that occurred while the user was focus-editing.
+ *
+ * - "local": keep what the user typed; the existing onUpdate path will persist
+ *   it to the server (last-write-wins on this side).
+ * - "external": discard the user's edits and apply the external content.
+ * - "merged": apply the user-authored merged content AND emit it to onUpdate
+ *   so the merged version is persisted server-side.
+ */
+export type ContentEditorResolution =
+  | { type: "local" }
+  | { type: "external" }
+  | { type: "merged"; content: string };
+
 interface ContentEditorProps {
   defaultValue?: string;
   onUpdate?: (markdown: string) => void;
@@ -76,6 +92,19 @@ interface ContentEditorProps {
   onSubmit?: () => void;
   onBlur?: () => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /**
+   * Called on blur when the external `defaultValue` has changed during the
+   * user's focus session AND the user has made local edits that diverge.
+   * The implementor typically opens a conflict dialog and returns the user's
+   * choice. If undefined or the returned resolution is `{ type: "local" }`,
+   * ContentEditor takes no further action and the existing onUpdate path
+   * persists the local edits.
+   */
+  onExternalConflict?: (params: {
+    local: string;
+    external: string;
+    baseline: string;
+  }) => Promise<ContentEditorResolution>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
   /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
@@ -122,6 +151,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onSubmit,
       onBlur,
       onUploadFile,
+      onExternalConflict,
       showBubbleMenu = true,
       submitOnEnter = false,
       currentIssueId,
@@ -134,7 +164,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
+    const onExternalConflictRef = useRef(onExternalConflict);
+    const defaultValueRef = useRef(defaultValue);
     const lastEmittedRef = useRef<string | null>(null);
+    // Captures the external value at focus-start so we can detect "external
+    // changed during this focus session". Set in onFocus, consumed (and
+    // cleared) in onBlur.
+    const focusBaselineRef = useRef<string | null>(null);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -148,8 +184,71 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onUploadFileRef.current = onUploadFile;
+    onExternalConflictRef.current = onExternalConflict;
+    defaultValueRef.current = defaultValue;
 
     const queryClient = useQueryClient();
+
+    // Apply a conflict resolution by mutating the editor and bookkeeping refs.
+    // - "local": no-op; the existing onUpdate debounce will persist local edits.
+    // - "external"/"merged": cancel any pending local save, replace content
+    //   with `emitUpdate: false` (so we don't re-fire onUpdate), and update
+    //   `lastEmittedRef` so the next typed character is detected as dirty.
+    //   "merged" additionally emits onUpdate so the merged version is saved.
+    function applyResolution(
+      ed: Editor,
+      r: ContentEditorResolution,
+      externalSnapshot: string,
+    ) {
+      if (r.type === "local") return;
+
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+      }
+
+      const newContent =
+        r.type === "external" ? externalSnapshot : r.content;
+      ed.commands.setContent(newContent, {
+        emitUpdate: false,
+        contentType: "markdown",
+      });
+      lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+
+      if (r.type === "merged") {
+        onUpdateRef.current?.(lastEmittedRef.current);
+      }
+    }
+
+    // On blur, decide whether an external update arrived during this focus
+    // session and, if so, whether it conflicts with local edits.
+    //
+    //   external === baseline → no external change happened; nothing to do.
+    //   local === baseline    → user didn't type; apply external silently.
+    //   local === external    → user happened to converge on external; no-op.
+    //   otherwise             → real conflict; defer to onExternalConflict.
+    async function handleBlurConflict(ed: Editor) {
+      const baseline = focusBaselineRef.current;
+      focusBaselineRef.current = null;
+      if (baseline === null) return;
+
+      const local = stripBlobUrls(ed.getMarkdown()).trimEnd();
+      const external = stripBlobUrls(
+        preprocessMarkdown(defaultValueRef.current ?? ""),
+      ).trimEnd();
+
+      if (external === baseline) return;
+      if (local === baseline) {
+        applyResolution(ed, { type: "external" }, external);
+        return;
+      }
+      if (local === external) return;
+
+      const resolver = onExternalConflictRef.current;
+      if (!resolver) return;
+      const resolution = await resolver({ local, external, baseline });
+      applyResolution(ed, resolution, external);
+    }
 
     const editor = useEditor({
       immediatelyRender: false,
@@ -179,7 +278,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onUpdateRef.current?.(md);
         }, debounceMs);
       },
-      onBlur: () => {
+      onFocus: () => {
+        focusBaselineRef.current = stripBlobUrls(
+          preprocessMarkdown(defaultValueRef.current ?? ""),
+        ).trimEnd();
+      },
+      onBlur: ({ editor: ed }) => {
+        void handleBlurConflict(ed);
         onBlurRef.current?.();
       },
       editorProps: {

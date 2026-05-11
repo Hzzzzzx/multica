@@ -32,9 +32,17 @@ vi.mock("./bubble-menu", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+const capturedHandlers = vi.hoisted<{
+  onFocus?: (args: { editor: unknown }) => void;
+  onBlur?: (args: { editor: unknown }) => void;
+}>(() => ({}));
 
 vi.mock("@tiptap/react", () => ({
-  useEditor: (options: { onCreate?: (args: { editor: unknown }) => void }) => {
+  useEditor: (options: {
+    onCreate?: (args: { editor: unknown }) => void;
+    onFocus?: (args: { editor: unknown }) => void;
+    onBlur?: (args: { editor: unknown }) => void;
+  }) => {
     if (!editorRef.current) {
       editorRef.current = {
         get isFocused() {
@@ -56,6 +64,8 @@ vi.mock("@tiptap/react", () => ({
         },
       };
     }
+    capturedHandlers.onFocus = options?.onFocus;
+    capturedHandlers.onBlur = options?.onBlur;
     if (!onCreateFired.value) {
       onCreateFired.value = true;
       options?.onCreate?.({ editor: editorRef.current });
@@ -69,6 +79,14 @@ vi.mock("@tiptap/react", () => ({
   ),
 }));
 
+function fireFocus() {
+  capturedHandlers.onFocus?.({ editor: editorRef.current });
+}
+
+function fireBlur() {
+  capturedHandlers.onBlur?.({ editor: editorRef.current });
+}
+
 import { ContentEditor } from "./content-editor";
 
 describe("ContentEditor", () => {
@@ -79,6 +97,8 @@ describe("ContentEditor", () => {
     editorState.markdown = "";
     editorRef.current = null;
     onCreateFired.value = false;
+    capturedHandlers.onFocus = undefined;
+    capturedHandlers.onBlur = undefined;
   });
 
   it("focuses the editor when clicking the empty container area", () => {
@@ -134,6 +154,207 @@ describe("ContentEditor", () => {
     rerender(<ContentEditor defaultValue="same content" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("on blur with no external change, does not invoke onExternalConflict", async () => {
+    const onExternalConflict = vi.fn();
+    editorState.markdown = "stable content";
+
+    render(
+      <ContentEditor
+        defaultValue="stable content"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    // User types something, but external value is unchanged.
+    editorState.markdown = "user typed";
+    fireBlur();
+
+    await Promise.resolve();
+    expect(onExternalConflict).not.toHaveBeenCalled();
+  });
+
+  it("on blur with external change but no local edits, applies external silently", async () => {
+    const onExternalConflict = vi.fn();
+    editorState.markdown = "old";
+
+    const { rerender } = render(
+      <ContentEditor
+        defaultValue="old"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    editorState.isFocused = true;
+    // External update arrives mid-edit (existing dirty-guard effect skips
+    // because the editor is focused).
+    rerender(
+      <ContentEditor
+        defaultValue="external change"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+    // User didn't type — editor markdown still matches baseline.
+    editorState.isFocused = false;
+    fireBlur();
+
+    await Promise.resolve();
+    expect(onExternalConflict).not.toHaveBeenCalled();
+    expect(mockSetContent).toHaveBeenCalledWith(
+      "external change",
+      expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
+  });
+
+  it("on blur with conflict, invokes onExternalConflict with local/external/baseline", async () => {
+    const onExternalConflict = vi
+      .fn()
+      .mockResolvedValue({ type: "local" });
+    editorState.markdown = "baseline";
+
+    const { rerender } = render(
+      <ContentEditor
+        defaultValue="baseline"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    editorState.isFocused = true;
+    rerender(
+      <ContentEditor
+        defaultValue="external change"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+    editorState.markdown = "user typed";
+    editorState.isFocused = false;
+    fireBlur();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onExternalConflict).toHaveBeenCalledWith({
+      local: "user typed",
+      external: "external change",
+      baseline: "baseline",
+    });
+  });
+
+  it("resolution=local: leaves editor content and does not call setContent", async () => {
+    const onExternalConflict = vi
+      .fn()
+      .mockResolvedValue({ type: "local" });
+    editorState.markdown = "baseline";
+
+    const { rerender } = render(
+      <ContentEditor
+        defaultValue="baseline"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    editorState.isFocused = true;
+    rerender(
+      <ContentEditor
+        defaultValue="external"
+        onUpdate={() => {}}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+    editorState.markdown = "user typed";
+    editorState.isFocused = false;
+    fireBlur();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("resolution=external: setContent with external, no onUpdate emit", async () => {
+    const onUpdate = vi.fn();
+    const onExternalConflict = vi
+      .fn()
+      .mockResolvedValue({ type: "external" });
+    editorState.markdown = "baseline";
+
+    const { rerender } = render(
+      <ContentEditor
+        defaultValue="baseline"
+        onUpdate={onUpdate}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    editorState.isFocused = true;
+    rerender(
+      <ContentEditor
+        defaultValue="external value"
+        onUpdate={onUpdate}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+    editorState.markdown = "user typed";
+    editorState.isFocused = false;
+    fireBlur();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockSetContent).toHaveBeenCalledWith(
+      "external value",
+      expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("resolution=merged: setContent with merged + onUpdate fires with merged content", async () => {
+    const onUpdate = vi.fn();
+    const onExternalConflict = vi
+      .fn()
+      .mockResolvedValue({ type: "merged", content: "merged result" });
+    editorState.markdown = "baseline";
+
+    const { rerender } = render(
+      <ContentEditor
+        defaultValue="baseline"
+        onUpdate={onUpdate}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+
+    fireFocus();
+    editorState.isFocused = true;
+    rerender(
+      <ContentEditor
+        defaultValue="external value"
+        onUpdate={onUpdate}
+        onExternalConflict={onExternalConflict}
+      />,
+    );
+    editorState.markdown = "user typed";
+    editorState.isFocused = false;
+    fireBlur();
+
+    // setContent in real Tiptap mutates editor markdown; mock it.
+    editorState.markdown = "merged result";
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockSetContent).toHaveBeenCalledWith(
+      "merged result",
+      expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
+    expect(onUpdate).toHaveBeenCalledWith("merged result");
   });
 
   it("does not sync when editor is unfocused but has unsaved local edits", () => {
