@@ -259,6 +259,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
+      "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -724,6 +725,33 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // chat:session_updated fires after the creator renames a session in
+    // any tab/device. Patch the cached row inline so the dropdown reflects
+    // the new title without a full sessions-list refetch.
+    const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
+      const payload = p as {
+        chat_session_id: string;
+        title?: string;
+        updated_at?: string;
+      };
+      chatWsLogger.info("chat:session_updated (global)", payload);
+      const id = getCurrentWsId();
+      if (!id) return;
+      const patch = (
+        old?: { id: string; title: string; updated_at: string }[],
+      ) =>
+        old?.map((s) =>
+          s.id === payload.chat_session_id
+            ? {
+                ...s,
+                title: payload.title ?? s.title,
+                updated_at: payload.updated_at ?? s.updated_at,
+              }
+            : s,
+        );
+      qc.setQueryData(chatKeys.sessions(id), patch);
+    });
+
     // chat:session_deleted fires after a hard delete. The originating tab has
     // already optimistically dropped the row via useDeleteChatSession; this
     // handler keeps OTHER tabs/devices in sync and also clears the active
@@ -784,6 +812,7 @@ export function useRealtimeSync(
       unsubTaskFailed();
       unsubChatSessionRead();
       unsubChatSessionDeleted();
+      unsubChatSessionUpdated();
       timers.forEach(clearTimeout);
       timers.clear();
     };

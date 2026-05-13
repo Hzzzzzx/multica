@@ -54,6 +54,7 @@ export type WSEventType =
   | "chat:done"
   | "chat:session_read"
   | "chat:session_deleted"
+  | "chat:session_updated"
   | "project:created"
   | "project:updated"
   | "project:deleted"
