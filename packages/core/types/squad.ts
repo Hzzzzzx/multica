@@ -7,6 +7,8 @@ export interface Squad {
   workspace_id: string;
   name: string;
   description: string;
+  instructions: string;
+  avatar_url: string | null;
   leader_id: string;
   creator_id: string;
   created_at: string;
@@ -44,7 +46,9 @@ export interface CreateSquadRequest {
 export interface UpdateSquadRequest {
   name?: string;
   description?: string;
+  instructions?: string;
   leader_id?: string;
+  avatar_url?: string;
 }
 
 export interface AddSquadMemberRequest {

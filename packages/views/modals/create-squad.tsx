@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useNavigation } from "../navigation";
 import {
   Dialog,
@@ -48,7 +48,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
         description: description.trim() || undefined,
         leader_id: leaderId,
       });
-      queryClient.invalidateQueries({ queryKey: ["squads"] });
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       onClose();
       toast.success("Squad created");
       router.push(wsPaths.squadDetail(squad.id));

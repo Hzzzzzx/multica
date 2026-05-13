@@ -1329,7 +1329,7 @@ export class ApiClient {
     return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; leader_id?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
     return this.fetch(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
   }
 
@@ -1347,6 +1347,10 @@ export class ApiClient {
 
   async removeSquadMember(squadId: string, data: { member_type: string; member_id: string }): Promise<void> {
     await this.fetch(`/api/squads/${squadId}/members`, { method: "DELETE", body: JSON.stringify(data) });
+  }
+
+  async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
+    return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
   }
 
   // Autopilots
