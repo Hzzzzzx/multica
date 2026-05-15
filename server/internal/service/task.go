@@ -44,11 +44,9 @@ type TaskService struct {
 	// client.
 	EmptyClaim *EmptyClaimCache
 	// Liveness provides real-time heartbeat verification for runtimes.
-	// Used by the global RequeueExpiredClaimLeases backstop to confirm
-	// a runtime is truly alive before requeuing its expired leases.
-	// When nil or unavailable, global requeue is skipped entirely
-	// (the preflight self-requeue in ClaimTaskForRuntime handles live
-	// runtimes).
+	// Currently unused — the global backstop no longer requeues tasks
+	// (alive runtimes self-requeue via preflight, dead runtimes stay
+	// dispatched for the offline sweeper). Retained for future use.
 	Liveness LivenessChecker
 
 	analyticsContextMu    sync.Mutex
@@ -1020,48 +1018,18 @@ func startAgentTaskRowToQueue(r db.StartAgentTaskWithClaimTokenRow) db.AgentTask
 	}
 }
 
-// RequeueExpiredClaimLeases is the global backstop that requeues dispatched
-// tasks whose claim lease has expired. Only requeues tasks for runtimes
-// confirmed alive via LivenessStore (Redis heartbeat). When LivenessStore is
-// unavailable, skips entirely — the preflight self-requeue in
-// ClaimTaskForRuntime handles live runtimes, and the offline sweeper will
-// eventually fail tasks on dead ones.
+// RequeueExpiredClaimLeases is the global backstop. It does NOT requeue
+// tasks directly — alive runtimes handle their own expired leases via the
+// preflight in ClaimTaskForRuntime, and dead runtimes must stay dispatched
+// so FailTasksForOfflineRuntimes can fail+retry them properly. Requeuing
+// dead runtime tasks to 'queued' would create a blackhole: offline sweeper
+// only handles dispatched/running, and queued tasks wait up to 2h TTL.
+//
+// This method exists as an observability hook and returns 0.
 func (s *TaskService) RequeueExpiredClaimLeases(ctx context.Context, staleThresholdSecs float64) int {
-	if s.Liveness == nil || !s.Liveness.Available() {
-		// No reliable liveness signal — skip global requeue.
-		// The preflight in ClaimTaskForRuntime handles live runtimes.
-		return 0
-	}
-
-	runtimeIDs, err := s.Queries.ListRuntimesWithExpiredClaimLeases(ctx)
-	if err != nil {
-		slog.Warn("list runtimes with expired claim leases failed", "error", err)
-		return 0
-	}
-	if len(runtimeIDs) == 0 {
-		return 0
-	}
-
-	// Convert to string IDs for liveness check.
-	idStrs := make([]string, len(runtimeIDs))
-	for i, id := range runtimeIDs {
-		idStrs[i] = util.UUIDToString(id)
-	}
-
-	alive, ok := s.Liveness.IsAliveBatch(ctx, idStrs)
-	if !ok {
-		// Liveness backend errored — skip to avoid requeuing to dead runtimes.
-		slog.Warn("liveness check failed for expired claim leases, skipping global requeue")
-		return 0
-	}
-
-	total := 0
-	for i, id := range runtimeIDs {
-		if alive[idStrs[i]] {
-			total += s.RequeueExpiredClaimLeasesForRuntime(ctx, id)
-		}
-	}
-	return total
+	// No-op: alive runtimes self-requeue via preflight, dead runtimes
+	// stay dispatched for the offline sweeper to fail+retry.
+	return 0
 }
 
 // RequeueExpiredClaimLeasesForRuntime requeues this runtime's own expired

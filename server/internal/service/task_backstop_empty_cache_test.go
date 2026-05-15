@@ -8,8 +8,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestBackstopRequeue_InvalidatesEmptyCache verifies that when the global
-// backstop requeue path calls notifyTaskAvailable (via
+// TestBackstopRequeue_InvalidatesEmptyCache verifies that when the preflight
+// requeue path calls notifyTaskAvailable (via
 // RequeueExpiredClaimLeasesForRuntime), the EmptyClaim cache is bumped so
 // the handler's next ClaimTaskForRuntime does NOT hit a stale empty verdict.
 //
