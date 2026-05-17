@@ -1213,6 +1213,129 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	}
 }
 
+func TestDaemonRegister_LegacyDaemonIDCannotTakeOverOtherMembersRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	ownerID := createHandlerTestMember(t, "member")
+	attackerID := createHandlerTestMember(t, "member")
+	legacyDaemonID := "legacy-takeover-" + uuid.NewString()
+	newDaemonID := "fresh-takeover-" + uuid.NewString()
+	provider := "claude"
+
+	var victimRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, $2, 'victim-legacy-runtime', 'local', $3, 'online', '', '{}'::jsonb, $4, now())
+		RETURNING id
+	`, testWorkspaceID, legacyDaemonID, provider, ownerID).Scan(&victimRuntimeID); err != nil {
+		t.Fatalf("seed victim legacy runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id IN ($1, $2)`, legacyDaemonID, newDaemonID)
+	})
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config, runtime_id,
+			visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "victim-legacy-agent-"+uuid.NewString(), victimRuntimeID, ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("seed victim agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH next_issue AS (
+			SELECT COALESCE(MAX(number), 0) + 1 AS number FROM issue WHERE workspace_id = $1
+		)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		SELECT $1, 'legacy takeover guard', 'todo', 'medium', $2, 'member', number, 0 FROM next_issue
+		RETURNING id
+	`, testWorkspaceID, ownerID).Scan(&issueID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'running', $3)
+		RETURNING id
+	`, agentID, issueID, victimRuntimeID).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.DaemonRegister(w, newRequestAs(attackerID, http.MethodPost, "/api/daemon/register", map[string]any{
+		"workspace_id":      testWorkspaceID,
+		"daemon_id":         newDaemonID,
+		"legacy_daemon_ids": []string{legacyDaemonID},
+		"device_name":       "attacker-machine",
+		"runtimes": []map[string]any{
+			{"name": "attacker-runtime", "type": provider, "version": "1.0.0", "status": "online"},
+		},
+	}))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("DaemonRegister legacy takeover: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var runtimeIDAfter, ownerIDAfter string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, owner_id FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND provider = $3
+	`, testWorkspaceID, legacyDaemonID, provider).Scan(&runtimeIDAfter, &ownerIDAfter); err != nil {
+		t.Fatalf("read victim runtime after rejected register: %v", err)
+	}
+	if runtimeIDAfter != victimRuntimeID {
+		t.Fatalf("victim runtime id changed: got %s want %s", runtimeIDAfter, victimRuntimeID)
+	}
+	if ownerIDAfter != ownerID {
+		t.Fatalf("victim runtime owner changed: got %s want %s", ownerIDAfter, ownerID)
+	}
+
+	var attackerRuntimeCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2
+	`, testWorkspaceID, newDaemonID).Scan(&attackerRuntimeCount); err != nil {
+		t.Fatalf("count attacker runtime: %v", err)
+	}
+	if attackerRuntimeCount != 0 {
+		t.Fatalf("expected rejected legacy takeover to create no attacker runtime, got %d", attackerRuntimeCount)
+	}
+
+	var agentRuntimeID, taskRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&agentRuntimeID); err != nil {
+		t.Fatalf("read agent runtime_id: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskRuntimeID); err != nil {
+		t.Fatalf("read task runtime_id: %v", err)
+	}
+	if agentRuntimeID != victimRuntimeID {
+		t.Fatalf("agent binding changed: got %s want %s", agentRuntimeID, victimRuntimeID)
+	}
+	if taskRuntimeID != victimRuntimeID {
+		t.Fatalf("task binding changed: got %s want %s", taskRuntimeID, victimRuntimeID)
+	}
+}
+
 // TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal covers the
 // direction missed by the initial implementation: the stored runtime row is
 // `host` (no `.local`) but the daemon's current `os.Hostname()` now returns

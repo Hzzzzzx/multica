@@ -330,6 +330,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	daemonTokenAuth := false
 	var daemonTokenMember db.Member
 	daemonTokenMemberValid := false
+	var patMember db.Member
+	patMemberValid := false
 	if daemonWsID := middleware.DaemonWorkspaceIDFromContext(r.Context()); daemonWsID != "" {
 		daemonTokenAuth = true
 		if daemonWsID != req.WorkspaceID {
@@ -395,6 +397,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ownerID = member.UserID
+		patMember = member
+		patMemberValid = true
 		// PAT path covers two install shapes we can distinguish: Desktop's
 		// embedded daemon (launched_by=="desktop") vs the legacy Advanced
 		// manual install (`multica login --token` + `multica daemon start`).
@@ -417,6 +421,21 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !daemonTokenAuth && patMemberValid && len(req.LegacyDaemonIDs) > 0 {
+		for _, runtime := range req.Runtimes {
+			provider := normalizeRuntimeProvider(runtime.Type)
+			if err := h.ensureLegacyRuntimeMergeAllowed(r.Context(), wsUUID, provider, req.LegacyDaemonIDs, patMember); err != nil {
+				if errors.Is(err, errLegacyRuntimeMergeForbidden) {
+					writeError(w, http.StatusForbidden, "legacy daemon_id belongs to another member")
+					return
+				}
+				slog.Error("daemon register: legacy merge permission check failed", "error", err, "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID)
+				writeError(w, http.StatusInternalServerError, "failed to register runtime")
+				return
+			}
+		}
+	}
+
 	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
@@ -425,10 +444,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
-		provider := strings.TrimSpace(runtime.Type)
-		if provider == "" {
-			provider = "unknown"
-		}
+		provider := normalizeRuntimeProvider(runtime.Type)
 		name := strings.TrimSpace(runtime.Name)
 		if name == "" {
 			name = provider
@@ -541,7 +557,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			// credentials are already bound to one daemon_id, so accepting
 			// arbitrary legacy_daemon_ids there would let one daemon take over
 			// another daemon's runtime in the same workspace.
-			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+			if err := h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs, patMember); err != nil {
+				if errors.Is(err, errLegacyRuntimeMergeForbidden) {
+					writeError(w, http.StatusForbidden, "legacy daemon_id belongs to another member")
+					return
+				}
+				slog.Error("daemon register: legacy merge failed", "error", err, "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID)
+				writeError(w, http.StatusInternalServerError, "failed to register runtime")
+				return
+			}
 		}
 
 		resp = append(resp, runtimeToResponse(registered))
@@ -584,9 +608,83 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 // precisely when case-duplicate rows exist — which is the bug we're fixing.
 // We also dedupe across legacy ids so overlapping candidates (e.g. `foo` and
 // `foo.local` both resolving to the same stored row) don't double-process.
-func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntime, provider string, legacyIDs []string) {
+func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntime, provider string, legacyIDs []string, member db.Member) error {
 	newID := uuidToString(registered.ID)
-	merged := make(map[string]struct{})
+	candidates, err := h.legacyRuntimeMergeCandidates(r.Context(), registered.WorkspaceID, provider, legacyIDs, member)
+	if err != nil {
+		return err
+	}
+
+	for _, candidate := range candidates {
+		old := candidate.runtime
+		legacyID := candidate.legacyID
+		oldID := uuidToString(old.ID)
+		if oldID == newID {
+			continue
+		}
+
+		agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
+			NewRuntimeID: registered.ID,
+			OldRuntimeID: old.ID,
+		})
+		if err != nil {
+			slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+			continue
+		}
+		tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
+			NewRuntimeID: registered.ID,
+			OldRuntimeID: old.ID,
+		})
+		if err != nil {
+			slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+			continue
+		}
+		if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
+			ID:             registered.ID,
+			LegacyDaemonID: strToText(legacyID),
+		}); err != nil {
+			slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
+		}
+		if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
+			slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
+			continue
+		}
+
+		slog.Info("legacy runtime merged",
+			"legacy_daemon_id", legacyID,
+			"old_runtime_id", oldID,
+			"new_runtime_id", newID,
+			"provider", provider,
+			"agents_reassigned", agents,
+			"tasks_reassigned", tasks,
+		)
+	}
+	return nil
+}
+
+func normalizeRuntimeProvider(provider string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return "unknown"
+	}
+	return provider
+}
+
+var errLegacyRuntimeMergeForbidden = errors.New("legacy runtime belongs to another member")
+
+type legacyRuntimeMergeCandidate struct {
+	runtime  db.AgentRuntime
+	legacyID string
+}
+
+func (h *Handler) ensureLegacyRuntimeMergeAllowed(ctx context.Context, workspaceID pgtype.UUID, provider string, legacyIDs []string, member db.Member) error {
+	_, err := h.legacyRuntimeMergeCandidates(ctx, workspaceID, provider, legacyIDs, member)
+	return err
+}
+
+func (h *Handler) legacyRuntimeMergeCandidates(ctx context.Context, workspaceID pgtype.UUID, provider string, legacyIDs []string, member db.Member) ([]legacyRuntimeMergeCandidate, error) {
+	candidates := make([]legacyRuntimeMergeCandidate, 0)
+	seen := make(map[string]struct{})
 
 	for _, legacyID := range legacyIDs {
 		legacyID = strings.TrimSpace(legacyID)
@@ -594,62 +692,31 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 			continue
 		}
 
-		matches, err := h.Queries.FindLegacyRuntimesByDaemonID(r.Context(), db.FindLegacyRuntimesByDaemonIDParams{
-			WorkspaceID: registered.WorkspaceID,
+		matches, err := h.Queries.FindLegacyRuntimesByDaemonID(ctx, db.FindLegacyRuntimesByDaemonIDParams{
+			WorkspaceID: workspaceID,
 			Provider:    provider,
 			DaemonID:    legacyID,
 		})
 		if err != nil {
-			slog.Warn("legacy runtime merge: lookup failed", "legacy_daemon_id", legacyID, "error", err)
-			continue
+			return nil, err
 		}
 		for _, old := range matches {
 			oldID := uuidToString(old.ID)
-			if oldID == newID {
+			if _, ok := seen[oldID]; ok {
 				continue
 			}
-			if _, seen := merged[oldID]; seen {
-				continue
+			seen[oldID] = struct{}{}
+			if !canEditRuntime(member, old) {
+				return nil, errLegacyRuntimeMergeForbidden
 			}
-			merged[oldID] = struct{}{}
-
-			agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
-				NewRuntimeID: registered.ID,
-				OldRuntimeID: old.ID,
+			candidates = append(candidates, legacyRuntimeMergeCandidate{
+				runtime:  old,
+				legacyID: legacyID,
 			})
-			if err != nil {
-				slog.Warn("legacy runtime merge: reassign agents failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
-				continue
-			}
-			tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
-				NewRuntimeID: registered.ID,
-				OldRuntimeID: old.ID,
-			})
-			if err != nil {
-				slog.Warn("legacy runtime merge: reassign tasks failed", "legacy_daemon_id", legacyID, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
-				continue
-			}
-			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
-				ID:             registered.ID,
-				LegacyDaemonID: strToText(legacyID),
-			}); err != nil {
-				slog.Warn("legacy runtime merge: record legacy daemon_id failed", "legacy_daemon_id", legacyID, "error", err)
-			}
-			if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
-				slog.Warn("legacy runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
-				continue
-			}
-
-			slog.Info("legacy runtime merged",
-				"legacy_daemon_id", legacyID,
-				"old_runtime_id", oldID,
-				"new_runtime_id", newID,
-				"provider", provider,
-				"agents_reassigned", agents,
-				"tasks_reassigned", tasks,
-			)
 		}
 	}
+
+	return candidates, nil
 }
 
 func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request) {
