@@ -185,7 +185,7 @@ export function MyIssuesPage() {
           </div>
         </div>
         {viewMode === "list" ? (
-          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-1">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}

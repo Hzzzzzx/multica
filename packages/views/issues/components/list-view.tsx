@@ -67,7 +67,7 @@ export function ListView({
     : undefined;
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-2">
+    <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
       <Accordion.Root
         multiple
         className="space-y-1"
