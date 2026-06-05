@@ -61,6 +61,29 @@ func (q *Queries) AcquireLarkWSLease(ctx context.Context, arg AcquireLarkWSLease
 	return i, err
 }
 
+const backfillLarkInstallationRegionToLark = `-- name: BackfillLarkInstallationRegionToLark :execrows
+UPDATE lark_installation
+SET region     = 'lark',
+    updated_at = now()
+WHERE region = 'feishu'
+`
+
+// Upgrade repair: flip every installation still carrying the migration-116
+// default ('feishu') to 'lark'. Called ONLY by
+// BackfillRegionFromLegacyOverride, and ONLY when the deployment's global
+// base-URL override pointed at Lark international — on such a deployment the
+// whole integration talked to open.larksuite.com, so every existing install
+// is really Lark and the migration's mainland default mislabels it.
+// Idempotent: once flipped there is nothing left at 'feishu' to update, and
+// new installs already carry the device-flow-detected region.
+func (q *Queries) BackfillLarkInstallationRegionToLark(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillLarkInstallationRegionToLark)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimLarkInboundDedup = `-- name: ClaimLarkInboundDedup :one
 
 INSERT INTO lark_inbound_message_dedup (installation_id, message_id, claim_token)

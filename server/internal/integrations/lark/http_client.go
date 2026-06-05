@@ -33,10 +33,13 @@ import (
 // never present a token that's about to lapse mid-flight.
 
 const (
-	// defaultLarkBaseURL is the production 飞书 (mainland) open-platform
-	// host. Operators on the Lark international tenant set
-	// MULTICA_LARK_HTTP_BASE_URL to https://open.larksuite.com; tests
-	// substitute an httptest.Server URL.
+	// defaultLarkBaseURL is the mainland 飞书 open-platform host. It is the
+	// fallback host for an installation whose region is feishu (or unset);
+	// Region.OpenPlatformBaseURL maps region=lark to open.larksuite.com.
+	// Operators do NOT set MULTICA_LARK_HTTP_BASE_URL to pick a cloud
+	// anymore — the per-installation region does that automatically. The
+	// env var remains only as a deployment-wide override (proxy / mock /
+	// single-cloud staging); tests substitute an httptest.Server URL.
 	defaultLarkBaseURL = "https://open.feishu.cn"
 
 	// tokenSafetyMargin is subtracted from Lark's `expire` so we
@@ -117,7 +120,14 @@ func NewHTTPAPIClient(cfg HTTPClientConfig) APIClient {
 type httpAPIClient struct {
 	cfg HTTPClientConfig
 
-	mu     sync.Mutex
+	mu sync.Mutex
+	// tokens caches tenant_access_token keyed by app_id only — NOT by
+	// (app_id, region). This is safe because a Lark/飞书 app_id (the
+	// "cli_..." credential) is globally unique across both clouds and an
+	// app exists on exactly one of them, so an app_id never maps to two
+	// regions. The DB enforces the same assumption with UNIQUE(app_id) on
+	// lark_installation. If Lark ever reused an app_id across clouds, both
+	// this cache key and that constraint would need region added.
 	tokens map[string]*cachedToken
 }
 
