@@ -545,6 +545,42 @@ describe("CreateIssueModal", () => {
     });
   });
 
+  it("prunes draft attachments the reopened description no longer references", async () => {
+    const referenced = {
+      id: "11111111-2222-3333-4444-555555555555",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "kept.png",
+      url: "https://cdn.example.test/kept.png",
+      download_url: "",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      content_type: "image/png",
+      size_bytes: 123,
+      created_at: "2026-06-12T00:00:00Z",
+    };
+    const deleted = {
+      ...referenced,
+      id: "99999999-8888-7777-6666-555555555555",
+      filename: "deleted.png",
+      url: "https://cdn.example.test/deleted.png",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/99999999-8888-7777-6666-555555555555/download",
+    };
+    mockDraftStore.draft.title = "Image draft";
+    mockDraftStore.draft.description = `![kept.png](${referenced.markdown_url})`;
+    mockDraftStore.draft.attachments = [referenced, deleted];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockSetDraft).toHaveBeenCalledWith({ attachments: [referenced] });
+    });
+  });
+
   // Manual → agent must also forward the picked squad. Without this branch
   // the agent panel silently falls back to the persisted actor / first
   // visible agent and the user loses the squad they just chose in manual.

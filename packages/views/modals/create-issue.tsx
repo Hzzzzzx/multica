@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -159,6 +159,23 @@ export function ManualCreatePanel({
   });
 
   const draftAttachments = draft.attachments ?? [];
+
+  // Prune draft attachments whose markdown reference was deleted in an
+  // earlier editing session. Runs once on mount: at that point the persisted
+  // description IS the draft body (no editor edits have happened yet), so
+  // dropping unreferenced records is safe. Don't prune on description updates
+  // — an onUpdate flush can race a just-finished upload whose markdown link
+  // hasn't been inserted yet, and pruning there would drop a live attachment.
+  useEffect(() => {
+    const { draft: current } = useIssueDraftStore.getState();
+    const attachments = current.attachments ?? [];
+    const kept = attachments.filter((a) =>
+      contentReferencesAttachment(current.description, a),
+    );
+    if (kept.length !== attachments.length) setDraft({ attachments: kept });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
