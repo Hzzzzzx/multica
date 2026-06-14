@@ -61,6 +61,16 @@ if (process.platform !== "win32") {
 
 const PROTOCOL = "multica";
 
+process.on("uncaughtException", (err) => {
+  if ((err as NodeJS.ErrnoException).code === "EPIPE") return;
+  // eslint-disable-next-line no-console
+  console.error("[uncaughtException]", err);
+});
+process.on("unhandledRejection", (reason) => {
+  // eslint-disable-next-line no-console
+  console.error("[unhandledRejection]", reason);
+});
+
 let mainWindow: BrowserWindow | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
@@ -223,8 +233,14 @@ function createWindow(): void {
   // Gated by `is.dev` to keep production stderr clean — packaged builds
   // don't have a terminal anyway, and we ship to crash-reporting separately.
   if (is.dev) {
-    const log = (tag: string, ...args: unknown[]) =>
-      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+    const log = (tag: string, ...args: unknown[]) => {
+      try {
+        process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+      } catch {
+        // EPIPE: the parent process pipe is closed. Swallow to avoid
+        // an uncaught exception that kills the Electron main process.
+      }
+    };
 
     // Forward every renderer-side console.* call. The detail object also
     // carries source URL + line — included so a thrown stack trace from

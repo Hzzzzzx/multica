@@ -406,6 +406,12 @@ export class ApiClient {
     });
   }
 
+  async devLogin(): Promise<LoginResponse> {
+    return this.fetch("/auth/dev-login", {
+      headers: { Accept: "application/json" },
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }

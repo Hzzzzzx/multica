@@ -192,6 +192,22 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Chrys — stylized "C" mark from the Chrys ASCII banner
+function ChrysLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#1a1a2e" />
+      <path
+        d="M17.5 8.5C16.5 6.8 14.5 6 12 6c-3.3 0-6 2.7-6 6s2.7 6 6 6c2.5 0 4.5-.8 5.5-2.5"
+        stroke="#e94560"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -226,6 +242,8 @@ export function ProviderLogo({
       return <GeminiLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "chrys":
+      return <ChrysLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

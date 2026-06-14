@@ -151,6 +151,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
 		})
+	case "chrys":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverChrysModels(ctx, executablePath)
+		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -727,6 +731,15 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kiro-cli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
+	})
+}
+
+func discoverChrysModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "chrys",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-chrys-discovery-",
+		acpArgs:      []string{"acp", "--agent", "Code", "--approval", "bypass"},
 	})
 }
 

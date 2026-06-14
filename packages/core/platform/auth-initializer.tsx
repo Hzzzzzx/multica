@@ -109,6 +109,24 @@ export function AuthInitializer({
     // Token mode: read from localStorage (Electron / legacy).
     const token = storage.getItem("multica_token");
     if (!token) {
+      if (process.env.NODE_ENV === "development") {
+        api
+          .devLogin()
+          .then((res) => {
+            api.setToken(res.token);
+            storage.setItem("multica_token", res.token);
+            return Promise.all([api.getMe(), api.listWorkspaces()]);
+          })
+          .then(([user, wsList]) => {
+            onAuthSuccess(user);
+            qc.setQueryData(workspaceKeys.list(), wsList);
+          })
+          .catch((err) => {
+            logger.error("dev auto-login failed", err);
+            onAuthFailure();
+          });
+        return;
+      }
       onLogout?.();
       useAuthStore.setState({ isLoading: false });
       return;

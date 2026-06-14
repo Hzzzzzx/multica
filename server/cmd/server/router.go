@@ -469,6 +469,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
+	r.Get("/auth/dev-login", h.DevAutoLogin)
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)

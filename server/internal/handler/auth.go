@@ -641,7 +641,61 @@ func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	auth.ClearAuthCookies(w)
+	// Also clear the frontend session-flag cookie.
+	http.SetCookie(w, &http.Cookie{
+		Name: "multica_logged_in", Value: "", Path: "/",
+		MaxAge: -1, Expires: time.Unix(0, 0),
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
+}
+
+// DevAutoLogin creates (or reuses) a dev user, sets auth cookies, and
+// redirects to "/". This lets local-development users skip the login screen
+// entirely. It is a no-op (404) when APP_ENV=production.
+func (h *Handler) DevAutoLogin(w http.ResponseWriter, r *http.Request) {
+	if isProductionEnv() {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	user, isNew, err := h.findOrCreateUser(r.Context(), "dev@multica.local")
+	if err != nil {
+		slog.Warn("dev auto-login failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create dev user")
+		return
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("dev auto-login: failed to set auth cookies", "error", err)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "multica_logged_in",
+		Value:    "1",
+		Path:     "/",
+		MaxAge:   int(auth.AuthTokenTTL().Seconds()),
+		HttpOnly: false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	slog.Info("dev auto-login", "user_id", uuidToString(user.ID), "email", user.Email, "is_new", isNew)
+
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "application/json") {
+		writeJSON(w, http.StatusOK, LoginResponse{
+			Token: tokenString,
+			User:  userToResponse(user),
+		})
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {

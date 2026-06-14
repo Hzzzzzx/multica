@@ -68,3 +68,6 @@ server/server
 data/
 .kilo
 .idea
+
+# tool output
+graphify-out/

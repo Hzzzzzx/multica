@@ -47,6 +47,12 @@ export function proxy(req: NextRequest) {
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
+  // --- Dev auto-login: skip the login screen entirely ---
+  if (process.env.NODE_ENV === "development" && !hasSession &&
+      (pathname === "/" || pathname === "/login")) {
+    return NextResponse.redirect(new URL("/auth/dev-login", req.url));
+  }
+
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---
   // Old bookmarks and clients that hit us before the slug migration would
   // otherwise 404 since the route moved under [workspaceSlug].
