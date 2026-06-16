@@ -1,0 +1,1569 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "Multica",
+    "languages": [
+      "Go",
+      "TypeScript",
+      "SQL",
+      "YAML",
+      "Shell"
+    ],
+    "frameworks": [
+      "Chi v5",
+      "pgx/v5",
+      "sqlc",
+      "gorilla/websocket",
+      "golang-jwt",
+      "cobra",
+      "Next.js",
+      "React",
+      "Zustand",
+      "TanStack Query",
+      "Electron"
+    ],
+    "description": "开源托管 AI Agent 平台 — 将编码 Agent（Claude Code, Codex, Copilot 等）变成真正的团队成员。Go 后端 + Next.js 前端 + Electron 桌面端。",
+    "analyzedAt": "2026-06-13T16:59:04.246Z",
+    "gitCommitHash": "34d4cd3a2"
+  },
+  "layers": [
+    {
+      "id": "layer:agent-runtime",
+      "name": "Agent 执行运行时",
+      "description": "统一接口调度多种 Agent CLI（Claude/Codex/Copilot/OpenClaw/OpenCode/Gemini/Cursor/Kimi/Kiro/CodeBuddy/Antigravity）",
+      "nodeIds": [
+        "file:server/pkg/agent/agent.go",
+        "file:server/pkg/agent/claude.go",
+        "file:server/pkg/agent/codex.go",
+        "file:server/pkg/agent/copilot.go",
+        "file:server/pkg/agent/codebuddy.go",
+        "file:server/pkg/agent/antigravity.go",
+        "file:server/pkg/agent/openclaw.go",
+        "file:server/pkg/agent/opencode.go",
+        "file:server/pkg/agent/gemini.go",
+        "file:server/pkg/agent/cursor.go",
+        "file:server/pkg/agent/hermes.go",
+        "file:server/pkg/agent/kimi.go",
+        "file:server/pkg/agent/kiro.go",
+        "file:server/pkg/agent/pi.go",
+        "file:server/pkg/agent/models.go",
+        "file:server/pkg/agent/thinking.go",
+        "file:server/pkg/agent/version.go"
+      ]
+    },
+    {
+      "id": "layer:daemon",
+      "name": "Daemon 进程管理",
+      "description": "本地守护进程，检测 Agent CLI、管理任务队列、心跳上报、workdir 分配",
+      "nodeIds": [
+        "file:server/internal/daemon/daemon.go",
+        "file:server/internal/daemon/config.go",
+        "file:server/internal/daemon/health.go",
+        "file:server/internal/daemon/identity.go",
+        "file:server/internal/daemon/helpers.go",
+        "file:server/internal/daemon/execenv"
+      ]
+    },
+    {
+      "id": "layer:api-handlers",
+      "name": "HTTP API 处理层",
+      "description": "Chi 路由的 HTTP handler，处理 issue/agent/workspace/autopilot/squad/skill 等 CRUD",
+      "nodeIds": [
+        "file:server/cmd/server/router.go",
+        "file:server/internal/handler/auth.go",
+        "file:server/internal/handler/issue.go",
+        "file:server/internal/handler/agent.go",
+        "file:server/internal/handler/daemon.go",
+        "file:server/internal/handler/autopilot.go",
+        "file:server/internal/handler/squad.go",
+        "file:server/internal/handler/skill.go",
+        "file:server/internal/handler/dashboard.go",
+        "file:server/internal/handler/cloud_runtime.go",
+        "file:server/internal/handler/lark.go",
+        "file:server/internal/handler/github.go",
+        "file:server/internal/handler/webhook_delivery.go"
+      ]
+    },
+    {
+      "id": "layer:middleware",
+      "name": "中间件层",
+      "description": "认证、CORS、CSP、限流、日志、请求追踪",
+      "nodeIds": [
+        "file:server/internal/middleware/auth.go",
+        "file:server/internal/middleware/csp.go",
+        "file:server/internal/middleware/ratelimit.go",
+        "file:server/internal/middleware/client.go",
+        "file:server/internal/middleware/cloudfront.go",
+        "file:server/internal/middleware/request_logger.go",
+        "file:server/internal/middleware/owner_lookup.go"
+      ]
+    },
+    {
+      "id": "layer:data-access",
+      "name": "数据访问层 (sqlc + pgx)",
+      "description": "SQL 查询文件 → sqlc 生成 Go 类型安全代码，pgx 连接池管理",
+      "nodeIds": [
+        "file:server/sqlc.yaml",
+        "file:server/pkg/db/queries/agent.sql",
+        "file:server/pkg/db/queries/issue.sql",
+        "file:server/pkg/db/queries/squad.sql",
+        "file:server/pkg/db/queries/lark.sql",
+        "file:server/pkg/db/queries/webhook_delivery.sql",
+        "file:server/pkg/db/queries/task_token.sql"
+      ]
+    },
+    {
+      "id": "layer:integrations",
+      "name": "第三方集成",
+      "description": "飞书 Bot、GitHub App、WebSocket 实时通信、CloudFront CDN、PostHog 分析",
+      "nodeIds": [
+        "file:server/internal/integrations/lark/client.go",
+        "file:server/internal/integrations/lark/ws_connector.go",
+        "file:server/internal/integrations/lark/dispatcher.go",
+        "file:server/internal/integrations/lark/hub.go",
+        "file:server/internal/integrations/lark/outbound.go"
+      ]
+    },
+    {
+      "id": "layer:scheduler",
+      "name": "定时任务调度器",
+      "description": "pgcron 定时任务、autopilot 定时触发、task usage 小时级 rollup",
+      "nodeIds": [
+        "file:server/internal/scheduler/manager.go",
+        "file:server/internal/scheduler/spec.go",
+        "file:server/internal/scheduler/db_ops.go",
+        "file:server/internal/scheduler/jobs_task_usage.go"
+      ]
+    },
+    {
+      "id": "layer:business-logic",
+      "name": "业务逻辑服务层",
+      "description": "issue 生命周期、autopilot 规则引擎、skill 导入冲突处理、squad 路由",
+      "nodeIds": [
+        "file:server/internal/service/issue.go",
+        "file:server/internal/service/agent_ready.go",
+        "file:server/internal/service/builtin_skills.go",
+        "file:server/internal/service/squad_no_action.go"
+      ]
+    },
+    {
+      "id": "layer:infrastructure",
+      "name": "基础设施与部署",
+      "description": "Docker、Helm K8s、CI/CD、Makefile、安装脚本",
+      "nodeIds": [
+        "config:docker-compose.yml",
+        "config:Dockerfile",
+        "config:Makefile",
+        "service:deploy/helm/multica/templates/backend.yaml",
+        "pipeline:.github/workflows/ci.yml"
+      ]
+    },
+    {
+      "id": "layer:entry-points",
+      "name": "程序入口",
+      "description": "4 个 Go 命令行入口：server（API 服务）、multica（CLI）、migrate（迁移）、backfill（数据修复）",
+      "nodeIds": [
+        "file:server/cmd/server/main.go",
+        "file:server/cmd/multica",
+        "file:server/cmd/migrate",
+        "file:server/cmd/backfill_task_usage_hourly"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "项目概览",
+      "description": "Multica 是开源托管 AI Agent 平台。Go 后端（Chi + pgx + sqlc）+ Next.js 前端 + Electron 桌面端。核心价值：把 Claude Code、Codex 等 CLI Agent 变成看板上的团队成员。",
+      "nodeIds": [
+        "document:README.md",
+        "document:CLAUDE.md"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "程序入口与服务启动",
+      "description": "server/cmd/server/main.go 启动 HTTP API 服务。router.go 注册所有路由，挂载中间件链（认证→CORS→CSP→限流→日志），然后注册公开路由（auth/config）和受保护路由组（api/*）。",
+      "nodeIds": [
+        "file:server/cmd/server/main.go",
+        "file:server/cmd/server/router.go"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "Agent 执行运行时 — 核心抽象",
+      "description": "server/pkg/agent/agent.go 定义了 Backend 接口（只有 Execute 方法）。每种 Agent CLI（claude.go, codex.go, codebuddy.go 等）实现这个接口。New() 工厂函数根据 agentType 字符串返回对应实现。这是整个项目最核心的设计——统一调度 13 种 Agent CLI。",
+      "nodeIds": [
+        "file:server/pkg/agent/agent.go",
+        "file:server/pkg/agent/claude.go",
+        "file:server/pkg/agent/codebuddy.go"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Daemon — 本地守护进程",
+      "description": "daemon.go 是 Agent 的本地执行者。config.go 探测 PATH 上的 Agent CLI（exec.LookPath + login shell fallback），daemon.go 管理任务队列、spawn 子进程、心跳上报、workdir 分配。execenv/ 管理每种 Agent 的运行环境配置。",
+      "nodeIds": [
+        "file:server/internal/daemon/daemon.go",
+        "file:server/internal/daemon/config.go"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "认证体系",
+      "description": "邮箱验证码 OTP 登录（无需密码）。auth.go 的 SendCode 发验证码，VerifyCode 验证并签发 JWT。cookie.go 设置 HttpOnly cookie（multica_auth + multica_csrf）。支持 MULTICA_DEV_VERIFICATION_CODE 做开发环境固定验证码。",
+      "nodeIds": [
+        "file:server/internal/handler/auth.go",
+        "file:server/internal/auth/cookie.go",
+        "file:server/internal/auth/jwt.go"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "中间件链",
+      "description": "每个请求经过：RequestID → ClientMetadata → RequestLogger → Recoverer → CSP → CORS → Auth。Auth 中间件解析 JWT、设置 X-User-ID 头、验证 CSRF。",
+      "nodeIds": [
+        "file:server/internal/middleware/auth.go",
+        "file:server/internal/middleware/csp.go",
+        "file:server/internal/middleware/ratelimit.go"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "数据访问 — sqlc 模式",
+      "description": "Multica 不用 ORM。开发者在 server/pkg/db/queries/*.sql 写 SQL，sqlc 编译时生成类型安全的 Go 代码（server/pkg/db/generated/*.sql.go）。pgx/v5 提供连接池和底层 PostgreSQL 驱动。",
+      "nodeIds": [
+        "file:server/sqlc.yaml",
+        "file:server/pkg/db/queries/issue.sql"
+      ]
+    },
+    {
+      "order": 8,
+      "title": "飞书集成",
+      "description": "server/internal/integrations/lark/ 是完整的飞书 Bot 集成。WebSocket 长连接接收消息，dispatcher 分发，outbound 发送。支持在飞书群里创建 issue、分配 Agent、接收进度推送。",
+      "nodeIds": [
+        "file:server/internal/integrations/lark/ws_connector.go",
+        "file:server/internal/integrations/lark/dispatcher.go"
+      ]
+    },
+    {
+      "order": 9,
+      "title": "定时任务调度",
+      "description": "scheduler/ 基于 pgcron（PostgreSQL 定时任务扩展）实现。manager.go 轮询任务表，jobs_task_usage.go 做每小时用量 rollup。autopilot 可以配置 cron 触发器，自动创建 issue 并分配给 Agent。",
+      "nodeIds": [
+        "file:server/internal/scheduler/manager.go",
+        "file:server/internal/scheduler/jobs_task_usage.go"
+      ]
+    },
+    {
+      "order": 10,
+      "title": "部署架构",
+      "description": "开发用 make dev（本地 Docker PostgreSQL + Go + Next.js）。生产用 Helm chart 部署到 K8s。CI/CD 用 GitHub Actions。也支持 self-host（docker-compose.selfhost.yml）。",
+      "nodeIds": [
+        "config:docker-compose.yml",
+        "config:Dockerfile",
+        "service:deploy/helm/multica/templates/backend.yaml"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "file:server/cmd/server/main.go",
+      "type": "file",
+      "name": "main.go",
+      "filePath": "server/cmd/server/main.go",
+      "summary": "HTTP API 服务入口。加载配置、初始化数据库连接池、启动 scheduler、注册 Chi 路由、启动 HTTP 监听。",
+      "tags": [
+        "entry-point",
+        "go",
+        "server"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/cmd/server/router.go",
+      "type": "file",
+      "name": "router.go",
+      "filePath": "server/cmd/server/router.go",
+      "summary": "Chi 路由注册中心。挂载全局中间件链（RequestID→Logger→CORS→CSP→Auth），注册公开路由（auth/config/webhook）和受保护 API 路由组（issues/agents/daemon/autopilot/squad/skill 等）。",
+      "tags": [
+        "router",
+        "chi",
+        "api"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/cmd/multica",
+      "type": "file",
+      "name": "multica CLI",
+      "filePath": "server/cmd/multica/",
+      "summary": "multica 命令行工具入口。基于 Cobra 框架，提供 login/daemon/workspace/issue/repo 等子命令。",
+      "tags": [
+        "cli",
+        "cobra"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/cmd/migrate",
+      "type": "file",
+      "name": "migrate",
+      "filePath": "server/cmd/migrate/",
+      "summary": "数据库迁移工具。运行 golang-migrate up/down。",
+      "tags": [
+        "migration",
+        "database"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/pkg/agent/agent.go",
+      "type": "file",
+      "name": "agent.go (Backend 接口)",
+      "filePath": "server/pkg/agent/agent.go",
+      "summary": "定义 Backend 接口（Execute 方法）和 New() 工厂函数。13 种 Agent CLI 的统一调度入口。launchHeaders map 提供 UI 可见的命令预览。",
+      "tags": [
+        "core",
+        "interface",
+        "agent-runtime"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/claude.go",
+      "type": "file",
+      "name": "claude.go",
+      "filePath": "server/pkg/agent/claude.go",
+      "summary": "Claude Code 后端实现。stream-json 协议，stdin/stdout 双向通信，支持 model/system-prompt/resume/thinking-level/custom-args。",
+      "tags": [
+        "agent",
+        "claude",
+        "stream-json"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/pkg/agent/codex.go",
+      "type": "file",
+      "name": "codex.go",
+      "filePath": "server/pkg/agent/codex.go",
+      "summary": "Codex 后端实现。app-server 模式，支持 OTEL 遥测刷新和语义线程命名。",
+      "tags": [
+        "agent",
+        "codex",
+        "app-server"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/pkg/agent/codebuddy.go",
+      "type": "file",
+      "name": "codebuddy.go",
+      "filePath": "server/pkg/agent/codebuddy.go",
+      "summary": "CodeBuddy 后端（Claude Code 分支）。镜像 claude.go 的 stream-json 模型。最近新增的一等 CLI 后端。",
+      "tags": [
+        "agent",
+        "codebuddy",
+        "stream-json"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/pkg/agent/copilot.go",
+      "type": "file",
+      "name": "copilot.go",
+      "filePath": "server/pkg/agent/copilot.go",
+      "summary": "GitHub Copilot CLI 后端。JSON 模式通信。",
+      "tags": [
+        "agent",
+        "copilot"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/antigravity.go",
+      "type": "file",
+      "name": "antigravity.go",
+      "filePath": "server/pkg/agent/antigravity.go",
+      "summary": "Google Antigravity (agy) 后端。print 模式，支持 per-agent model 选择。",
+      "tags": [
+        "agent",
+        "antigravity"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/openclaw.go",
+      "type": "file",
+      "name": "openclaw.go",
+      "filePath": "server/pkg/agent/openclaw.go",
+      "summary": "OpenClaw 后端。支持 local（嵌入式）和 gateway（远程路由）两种模式。",
+      "tags": [
+        "agent",
+        "openclaw"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/pkg/agent/opencode.go",
+      "type": "file",
+      "name": "opencode.go",
+      "filePath": "server/pkg/agent/opencode.go",
+      "summary": "OpenCode 后端。JSON 模式通信。",
+      "tags": [
+        "agent",
+        "opencode"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/gemini.go",
+      "type": "file",
+      "name": "gemini.go",
+      "filePath": "server/pkg/agent/gemini.go",
+      "summary": "Google Gemini CLI 后端。stream-json 模式。",
+      "tags": [
+        "agent",
+        "gemini"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/cursor.go",
+      "type": "file",
+      "name": "cursor.go",
+      "filePath": "server/pkg/agent/cursor.go",
+      "summary": "Cursor Agent CLI 后端。stream-json 模式，终端结果终止会话。",
+      "tags": [
+        "agent",
+        "cursor"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/hermes.go",
+      "type": "file",
+      "name": "hermes.go",
+      "filePath": "server/pkg/agent/hermes.go",
+      "summary": "Hermes (NousResearch) 后端。ACP 协议。",
+      "tags": [
+        "agent",
+        "hermes",
+        "acp"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/kimi.go",
+      "type": "file",
+      "name": "kimi.go",
+      "filePath": "server/pkg/agent/kimi.go",
+      "summary": "Kimi (Moonshot AI) 后端。ACP 协议。",
+      "tags": [
+        "agent",
+        "kimi",
+        "acp"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/kiro.go",
+      "type": "file",
+      "name": "kiro.go",
+      "filePath": "server/pkg/agent/kiro.go",
+      "summary": "Kiro CLI 后端。ACP 协议。",
+      "tags": [
+        "agent",
+        "kiro",
+        "acp"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/pi.go",
+      "type": "file",
+      "name": "pi.go",
+      "filePath": "server/pkg/agent/pi.go",
+      "summary": "Pi (pi.dev) 后端。JSON 模式。",
+      "tags": [
+        "agent",
+        "pi"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/agent/models.go",
+      "type": "file",
+      "name": "models.go",
+      "filePath": "server/pkg/agent/models.go",
+      "summary": "Agent 模型定义和 Model 列表抽象。",
+      "tags": [
+        "agent",
+        "models"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/pkg/agent/thinking.go",
+      "type": "file",
+      "name": "thinking.go",
+      "filePath": "server/pkg/agent/thinking.go",
+      "summary": "推理力度（thinking level）映射。将统一的 low/medium/high 转为各 CLI 原生参数。",
+      "tags": [
+        "agent",
+        "thinking"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/pkg/agent/version.go",
+      "type": "file",
+      "name": "version.go",
+      "filePath": "server/pkg/agent/version.go",
+      "summary": "CLI 版本探测。运行 --version 获取已安装的 Agent CLI 版本号。",
+      "tags": [
+        "agent",
+        "version"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/internal/daemon/daemon.go",
+      "type": "file",
+      "name": "daemon.go",
+      "filePath": "server/internal/daemon/daemon.go",
+      "summary": "本地守护进程核心。管理任务队列（claim/start/complete/fail）、spawn Agent 子进程、心跳上报、workdir 分配、agent 分支清理。3800 行，项目最大的单文件。",
+      "tags": [
+        "daemon",
+        "core",
+        "task-queue",
+        "process-management"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/daemon/config.go",
+      "type": "file",
+      "name": "config.go (Daemon)",
+      "filePath": "server/internal/daemon/config.go",
+      "summary": "Daemon 配置加载。探测 PATH 上的 13 种 Agent CLI（exec.LookPath + login shell fallback），支持 MULTICA_*_PATH 环境变量覆盖。",
+      "tags": [
+        "daemon",
+        "config",
+        "cli-detection"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/daemon/health.go",
+      "type": "file",
+      "name": "health.go",
+      "filePath": "server/internal/daemon/health.go",
+      "summary": "Daemon 健康检查和心跳上报逻辑。",
+      "tags": [
+        "daemon",
+        "health"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/daemon/identity.go",
+      "type": "file",
+      "name": "identity.go",
+      "filePath": "server/internal/daemon/identity.go",
+      "summary": "Daemon 身份标识管理。runtime ID 生成和持久化。",
+      "tags": [
+        "daemon",
+        "identity"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/internal/daemon/helpers.go",
+      "type": "file",
+      "name": "helpers.go",
+      "filePath": "server/internal/daemon/helpers.go",
+      "summary": "Daemon 辅助函数。",
+      "tags": [
+        "daemon",
+        "utils"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/internal/daemon/execenv",
+      "type": "file",
+      "name": "execenv/",
+      "filePath": "server/internal/daemon/execenv/",
+      "summary": "Agent 执行环境配置。管理每种 Agent 的 MCP 配置、Cursor MCP、OpenClaw config、Codex memory/skills、sidecar manifest 等。",
+      "tags": [
+        "daemon",
+        "execenv",
+        "config"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/auth.go",
+      "type": "file",
+      "name": "auth.go",
+      "filePath": "server/internal/handler/auth.go",
+      "summary": "认证 handler。SendCode 发验证码，VerifyCode 验证并签发 JWT。支持邮箱 OTP + Google OAuth + DEV 固定验证码。包含 findOrCreateUser 用户创建逻辑。",
+      "tags": [
+        "handler",
+        "auth",
+        "jwt",
+        "otp"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/issue.go",
+      "type": "file",
+      "name": "issue.go",
+      "filePath": "server/internal/handler/issue.go",
+      "summary": "Issue CRUD handler。看板核心——创建/更新/删除/排序 issue，评论线程，附件，状态变更。2500+ 行。",
+      "tags": [
+        "handler",
+        "issue",
+        "crud"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/agent.go",
+      "type": "file",
+      "name": "agent.go",
+      "filePath": "server/internal/handler/agent.go",
+      "summary": "Agent 配置 handler。创建/更新/删除 agent，设置 provider/model/custom-args/MCP config/thinking-level。",
+      "tags": [
+        "handler",
+        "agent",
+        "config"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/daemon.go",
+      "type": "file",
+      "name": "daemon.go (handler)",
+      "filePath": "server/internal/handler/daemon.go",
+      "summary": "Daemon 注册和运行时管理 handler。runtime 注册/心跳/磁盘用量/skill 列表/task claim+start+complete。",
+      "tags": [
+        "handler",
+        "daemon",
+        "runtime"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/autopilot.go",
+      "type": "file",
+      "name": "autopilot.go",
+      "filePath": "server/internal/handler/autopilot.go",
+      "summary": "Autopilot CRUD handler。定时/cron/webhook 触发的自动任务，自动创建 issue 并分配给 agent。",
+      "tags": [
+        "handler",
+        "autopilot",
+        "scheduler"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/squad.go",
+      "type": "file",
+      "name": "squad.go",
+      "filePath": "server/internal/handler/squad.go",
+      "summary": "Squad（Agent 小队）handler。创建 squad、leader agent 分配、member 管理、briefing。",
+      "tags": [
+        "handler",
+        "squad"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/dashboard.go",
+      "type": "file",
+      "name": "dashboard.go",
+      "filePath": "server/internal/handler/dashboard.go",
+      "summary": "Dashboard 数据聚合 handler。首页统计、activity feed。",
+      "tags": [
+        "handler",
+        "dashboard"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/handler/cloud_runtime.go",
+      "type": "file",
+      "name": "cloud_runtime.go",
+      "filePath": "server/internal/handler/cloud_runtime.go",
+      "summary": "云端 Runtime 管理 handler。创建/删除/监控云端 agent 运行实例。",
+      "tags": [
+        "handler",
+        "cloud-runtime"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/lark.go",
+      "type": "file",
+      "name": "lark.go",
+      "filePath": "server/internal/handler/lark.go",
+      "summary": "飞书集成 HTTP handler。飞书绑定、OAuth 回调。",
+      "tags": [
+        "handler",
+        "lark",
+        "integration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/handler/github.go",
+      "type": "file",
+      "name": "github.go",
+      "filePath": "server/internal/handler/github.go",
+      "summary": "GitHub App 集成 handler。PR 列表、CI 状态同步、仓库关联。",
+      "tags": [
+        "handler",
+        "github",
+        "integration"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/handler/webhook_delivery.go",
+      "type": "file",
+      "name": "webhook_delivery.go",
+      "filePath": "server/internal/handler/webhook_delivery.go",
+      "summary": "Webhook 投递 handler。管理 webhook 订阅和投递状态。",
+      "tags": [
+        "handler",
+        "webhook"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/middleware/auth.go",
+      "type": "file",
+      "name": "auth.go (middleware)",
+      "filePath": "server/internal/middleware/auth.go",
+      "summary": "认证中间件。解析 JWT（从 Bearer header 或 multica_auth cookie），设置 X-User-ID/X-User-Email 头，验证 CSRF token。",
+      "tags": [
+        "middleware",
+        "auth",
+        "jwt",
+        "csrf"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/middleware/csp.go",
+      "type": "file",
+      "name": "csp.go",
+      "filePath": "server/internal/middleware/csp.go",
+      "summary": "Content-Security-Policy 中间件。注入 CSP 头防止 XSS。",
+      "tags": [
+        "middleware",
+        "security",
+        "csp"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/middleware/ratelimit.go",
+      "type": "file",
+      "name": "ratelimit.go",
+      "filePath": "server/internal/middleware/ratelimit.go",
+      "summary": "限流中间件。基于 Redis 的滑动窗口限流，auth 端点单独配置。",
+      "tags": [
+        "middleware",
+        "rate-limit",
+        "redis"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/middleware/client.go",
+      "type": "file",
+      "name": "client.go",
+      "filePath": "server/internal/middleware/client.go",
+      "summary": "客户端元数据中间件。从 User-Agent 提取客户端信息。",
+      "tags": [
+        "middleware",
+        "client"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/internal/middleware/cloudfront.go",
+      "type": "file",
+      "name": "cloudfront.go",
+      "filePath": "server/internal/middleware/cloudfront.go",
+      "summary": "CloudFront CDN 签名 Cookie 刷新中间件。",
+      "tags": [
+        "middleware",
+        "cloudfront",
+        "cdn"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/middleware/request_logger.go",
+      "type": "file",
+      "name": "request_logger.go",
+      "filePath": "server/internal/middleware/request_logger.go",
+      "summary": "结构化请求日志中间件。记录方法/路径/状态/耗时/request-id。",
+      "tags": [
+        "middleware",
+        "logging"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/internal/middleware/owner_lookup.go",
+      "type": "file",
+      "name": "owner_lookup.go",
+      "filePath": "server/internal/middleware/owner_lookup.go",
+      "summary": "资源所有者查找中间件。验证当前用户是否有权操作目标资源。",
+      "tags": [
+        "middleware",
+        "authz"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/auth/cookie.go",
+      "type": "file",
+      "name": "cookie.go",
+      "filePath": "server/internal/auth/cookie.go",
+      "summary": "认证 Cookie 管理。SetAuthCookies 设置 HttpOnly JWT cookie + CSRF cookie，ClearAuthCookies 清除。",
+      "tags": [
+        "auth",
+        "cookie",
+        "security"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/auth/jwt.go",
+      "type": "file",
+      "name": "jwt.go",
+      "filePath": "server/internal/auth/jwt.go",
+      "summary": "JWT 签发和验证。HMAC-SHA256，默认密钥 multica-dev-secret-change-in-production。",
+      "tags": [
+        "auth",
+        "jwt",
+        "security"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/sqlc.yaml",
+      "type": "config",
+      "name": "sqlc.yaml",
+      "filePath": "server/sqlc.yaml",
+      "summary": "sqlc 配置。定义 SQL → Go 代码生成规则，输出到 server/pkg/db/generated/。",
+      "tags": [
+        "sqlc",
+        "codegen",
+        "database"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "file:server/pkg/db/queries/issue.sql",
+      "type": "file",
+      "name": "issue.sql",
+      "filePath": "server/pkg/db/queries/issue.sql",
+      "summary": "Issue 相关 SQL 查询。CRUD + 排序 + 过滤 + 分页。sqlc 编译为类型安全的 Go 函数。",
+      "tags": [
+        "sql",
+        "issue",
+        "database"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/pkg/db/queries/agent.sql",
+      "type": "file",
+      "name": "agent.sql",
+      "filePath": "server/pkg/db/queries/agent.sql",
+      "summary": "Agent 配置 SQL 查询。",
+      "tags": [
+        "sql",
+        "agent",
+        "database"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/db/queries/squad.sql",
+      "type": "file",
+      "name": "squad.sql",
+      "filePath": "server/pkg/db/queries/squad.sql",
+      "summary": "Squad 相关 SQL 查询。",
+      "tags": [
+        "sql",
+        "squad",
+        "database"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/pkg/db/queries/lark.sql",
+      "type": "file",
+      "name": "lark.sql",
+      "filePath": "server/pkg/db/queries/lark.sql",
+      "summary": "飞书集成 SQL 查询。绑定、消息记录、installation。",
+      "tags": [
+        "sql",
+        "lark",
+        "database"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/integrations/lark/ws_connector.go",
+      "type": "file",
+      "name": "ws_connector.go",
+      "filePath": "server/internal/integrations/lark/ws_connector.go",
+      "summary": "飞书 WebSocket 连接器。维持长连接，接收飞书事件，自动重连。",
+      "tags": [
+        "lark",
+        "websocket",
+        "integration"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/integrations/lark/dispatcher.go",
+      "type": "file",
+      "name": "dispatcher.go",
+      "filePath": "server/internal/integrations/lark/dispatcher.go",
+      "summary": "飞书消息分发器。将入站消息路由到对应的 issue 命令或 agent 触发。",
+      "tags": [
+        "lark",
+        "dispatcher",
+        "integration"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/integrations/lark/client.go",
+      "type": "file",
+      "name": "client.go",
+      "filePath": "server/internal/integrations/lark/client.go",
+      "summary": "飞书 API 客户端。封装飞书开放平台 HTTP API 调用。",
+      "tags": [
+        "lark",
+        "api-client",
+        "integration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/integrations/lark/outbound.go",
+      "type": "file",
+      "name": "outbound.go",
+      "filePath": "server/internal/integrations/lark/outbound.go",
+      "summary": "飞书出站消息。agent 进度推送、issue 状态变更通知发送到飞书群。",
+      "tags": [
+        "lark",
+        "outbound",
+        "integration"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/integrations/lark/hub.go",
+      "type": "file",
+      "name": "hub.go",
+      "filePath": "server/internal/integrations/lark/hub.go",
+      "summary": "飞书集成 Hub。管理多个飞书 installation 的连接和路由。",
+      "tags": [
+        "lark",
+        "hub",
+        "integration"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/scheduler/manager.go",
+      "type": "file",
+      "name": "manager.go",
+      "filePath": "server/internal/scheduler/manager.go",
+      "summary": "定时任务管理器。30s tick 轮询 pgcron 任务表，claim 并执行。支持全局和 workspace 级任务。",
+      "tags": [
+        "scheduler",
+        "cron",
+        "manager"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/scheduler/spec.go",
+      "type": "file",
+      "name": "spec.go",
+      "filePath": "server/internal/scheduler/spec.go",
+      "summary": "定时任务规格定义。cron 表达式、触发条件、作用域。",
+      "tags": [
+        "scheduler",
+        "spec"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/scheduler/jobs_task_usage.go",
+      "type": "file",
+      "name": "jobs_task_usage.go",
+      "filePath": "server/internal/scheduler/jobs_task_usage.go",
+      "summary": "Task usage 小时级 rollup 定时任务。聚合 agent 执行的 token/cost 统计。",
+      "tags": [
+        "scheduler",
+        "task-usage",
+        "rollup"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/scheduler/db_ops.go",
+      "type": "file",
+      "name": "db_ops.go",
+      "filePath": "server/internal/scheduler/db_ops.go",
+      "summary": "Scheduler 数据库操作封装。",
+      "tags": [
+        "scheduler",
+        "database"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/service/issue.go",
+      "type": "file",
+      "name": "issue.go (service)",
+      "filePath": "server/internal/service/issue.go",
+      "summary": "Issue 业务逻辑服务。状态转换验证、权限检查、副作用触发（issue 变更时推送 WS 事件）。",
+      "tags": [
+        "service",
+        "issue",
+        "business-logic"
+      ],
+      "complexity": "complex"
+    },
+    {
+      "id": "file:server/internal/service/agent_ready.go",
+      "type": "file",
+      "name": "agent_ready.go",
+      "filePath": "server/internal/service/agent_ready.go",
+      "summary": "Agent 就绪状态服务。检查 agent 配置完整性、runtime 可达性。",
+      "tags": [
+        "service",
+        "agent"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/service/builtin_skills.go",
+      "type": "file",
+      "name": "builtin_skills.go",
+      "filePath": "server/internal/service/builtin_skills.go",
+      "summary": "内置 Skills 定义。Multica 自带的 8 个 skill 包（creating-agents、mentioning、autopilots 等）。",
+      "tags": [
+        "service",
+        "skills",
+        "builtin"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "file:server/internal/service/squad_no_action.go",
+      "type": "file",
+      "name": "squad_no_action.go",
+      "filePath": "server/internal/service/squad_no_action.go",
+      "summary": "Squad 无操作检测。当 squad leader 无法处理任务时的降级逻辑。",
+      "tags": [
+        "service",
+        "squad"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "config:docker-compose.yml",
+      "type": "config",
+      "name": "docker-compose.yml",
+      "filePath": "docker-compose.yml",
+      "summary": "PostgreSQL 17 + pgvector 容器配置。开发环境数据库。",
+      "tags": [
+        "docker",
+        "database",
+        "infra"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:Dockerfile",
+      "type": "service",
+      "name": "Dockerfile",
+      "filePath": "Dockerfile",
+      "summary": "Go 后端生产镜像构建。多阶段构建，最终镜像极小。",
+      "tags": [
+        "docker",
+        "build",
+        "infra"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "config:Makefile",
+      "type": "config",
+      "name": "Makefile",
+      "filePath": "Makefile",
+      "summary": "开发/构建/测试命令集。make dev 一键启动，make build 编译，make test 测试。",
+      "tags": [
+        "make",
+        "build",
+        "dev"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "service:deploy/helm/multica/templates/backend.yaml",
+      "type": "service",
+      "name": "backend.yaml (Helm)",
+      "filePath": "deploy/helm/multica/templates/backend.yaml",
+      "summary": "Kubernetes 部署模板。Go 后端 Deployment + Service。",
+      "tags": [
+        "helm",
+        "k8s",
+        "deploy"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "pipeline:.github/workflows/ci.yml",
+      "type": "pipeline",
+      "name": "ci.yml",
+      "filePath": ".github/workflows/ci.yml",
+      "summary": "GitHub Actions CI 流水线。Go 测试 + TypeScript 类型检查 + lint + E2E。",
+      "tags": [
+        "ci",
+        "github-actions",
+        "testing"
+      ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "summary": "项目主文档。功能介绍、快速安装、架构图、技术栈。",
+      "tags": [
+        "docs",
+        "readme"
+      ],
+      "complexity": "simple"
+    },
+    {
+      "id": "document:CLAUDE.md",
+      "type": "document",
+      "name": "CLAUDE.md",
+      "filePath": "CLAUDE.md",
+      "summary": "AI 协作指南。包边界规则、状态管理约定、命令参考、编码规范。427 行的权威架构文档。",
+      "tags": [
+        "docs",
+        "architecture",
+        "conventions"
+      ],
+      "complexity": "moderate"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file:server/cmd/server/main.go",
+      "target": "file:server/cmd/server/router.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/auth.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/csp.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/ratelimit.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/request_logger.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/cloudfront.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/middleware/client.go",
+      "type": "middleware",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/auth.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/issue.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/agent.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/daemon.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/autopilot.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/squad.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/dashboard.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/cloud_runtime.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/lark.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/github.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/cmd/server/router.go",
+      "target": "file:server/internal/handler/webhook_delivery.go",
+      "type": "routes",
+      "weight": 0.5
+    },
+    {
+      "source": "file:server/internal/handler/auth.go",
+      "target": "file:server/internal/auth/cookie.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/auth.go",
+      "target": "file:server/internal/auth/jwt.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/middleware/auth.go",
+      "target": "file:server/internal/auth/jwt.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/daemon.go",
+      "target": "file:server/internal/daemon/daemon.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/daemon/daemon.go",
+      "target": "file:server/pkg/agent/agent.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/daemon/daemon.go",
+      "target": "file:server/internal/daemon/config.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/daemon/daemon.go",
+      "target": "file:server/internal/daemon/execenv",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/claude.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/codex.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/codebuddy.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/copilot.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/antigravity.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/openclaw.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/opencode.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/gemini.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/cursor.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/hermes.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/kimi.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/kiro.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/pi.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/thinking.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/pkg/agent/agent.go",
+      "target": "file:server/pkg/agent/version.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/issue.go",
+      "target": "file:server/internal/service/issue.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/agent.go",
+      "target": "file:server/internal/service/agent_ready.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/squad.go",
+      "target": "file:server/internal/service/squad_no_action.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/handler/issue.go",
+      "target": "file:server/pkg/db/queries/issue.sql",
+      "type": "reads_from",
+      "weight": 0.7
+    },
+    {
+      "source": "file:server/internal/handler/agent.go",
+      "target": "file:server/pkg/db/queries/agent.sql",
+      "type": "reads_from",
+      "weight": 0.7
+    },
+    {
+      "source": "file:server/internal/handler/squad.go",
+      "target": "file:server/pkg/db/queries/squad.sql",
+      "type": "reads_from",
+      "weight": 0.7
+    },
+    {
+      "source": "file:server/internal/handler/lark.go",
+      "target": "file:server/pkg/db/queries/lark.sql",
+      "type": "reads_from",
+      "weight": 0.7
+    },
+    {
+      "source": "file:server/sqlc.yaml",
+      "target": "file:server/pkg/db/queries/issue.sql",
+      "type": "configures",
+      "weight": 0.6
+    },
+    {
+      "source": "file:server/sqlc.yaml",
+      "target": "file:server/pkg/db/queries/agent.sql",
+      "type": "configures",
+      "weight": 0.6
+    },
+    {
+      "source": "file:server/internal/handler/lark.go",
+      "target": "file:server/internal/integrations/lark/ws_connector.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/integrations/lark/ws_connector.go",
+      "target": "file:server/internal/integrations/lark/dispatcher.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/integrations/lark/dispatcher.go",
+      "target": "file:server/internal/integrations/lark/client.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/integrations/lark/dispatcher.go",
+      "target": "file:server/internal/integrations/lark/outbound.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/integrations/lark/ws_connector.go",
+      "target": "file:server/internal/integrations/lark/hub.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/server/main.go",
+      "target": "file:server/internal/scheduler/manager.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/scheduler/manager.go",
+      "target": "file:server/internal/scheduler/spec.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/scheduler/manager.go",
+      "target": "file:server/internal/scheduler/jobs_task_usage.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/internal/scheduler/manager.go",
+      "target": "file:server/internal/scheduler/db_ops.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "file:server/cmd/multica",
+      "target": "file:server/internal/daemon/config.go",
+      "type": "calls",
+      "weight": 0.8
+    },
+    {
+      "source": "config:Dockerfile",
+      "target": "file:server/cmd/server/main.go",
+      "type": "deploys",
+      "weight": 0.7
+    },
+    {
+      "source": "config:docker-compose.yml",
+      "target": "config:Dockerfile",
+      "type": "depends_on",
+      "weight": 0.6
+    },
+    {
+      "source": "service:deploy/helm/multica/templates/backend.yaml",
+      "target": "config:Dockerfile",
+      "type": "deploys",
+      "weight": 0.7
+    },
+    {
+      "source": "pipeline:.github/workflows/ci.yml",
+      "target": "file:server/cmd/server/main.go",
+      "type": "triggers",
+      "weight": 0.6
+    },
+    {
+      "source": "document:README.md",
+      "target": "document:CLAUDE.md",
+      "type": "related",
+      "weight": 0.5
+    }
+  ]
+}

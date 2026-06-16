@@ -1,0 +1,87 @@
+# .understandignore — patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore
+#
+# Built-in defaults always excluded.
+#
+# --- From .gitignore ---
+
+# .DS_Store
+# .envrc
+# bin
+# dist-electron
+# *.tsbuildinfo
+# !apps/desktop/build/
+# !apps/desktop/build/**
+# .env*
+# !.env.example
+# !apps/desktop/.env.production
+# !apps/mobile/.env.staging
+# !apps/mobile/.env.production
+# server/bin/
+# server/tmp/
+# server/migrate
+# server/daemon
+# server/multica
+# test-results/
+# apps/web/test-results/
+# .context
+# .agent_context/
+# .multica/
+# .claude/
+# .tool-versions
+# _features/
+# *.pid
+# *.dmg
+# *.app
+# server/server
+# data/
+# .kilo
+# graphify-out/
+
+# --- Project-specific exclusions (active) ---
+
+# Test files
+*.test.*
+*.spec.*
+*.snap
+
+# Generated sqlc code
+server/pkg/db/generated/
+
+# Locale JSON (data, not architecture)
+packages/views/locales/
+
+# Agent template JSON
+server/internal/agenttmpl/templates/
+
+# Reserved slugs
+server/internal/handler/reserved_slugs.json
+
+# Migration SQL (119 files, low architecture value)
+server/migrations/
+
+# Mobile (separate app, 27k lines)
+apps/mobile/
+
+# Docs app
+apps/docs/
+
+# Android generated project
+android/
+apps/desktop/resources/
+apps/web/.next/
+server/bin/
+
+# Images and binaries
+*.webp
+*.jar
+*.keystore
+*.png
+
+# Frontend (analyzing backend only this round)
+apps/
+packages/
+e2e/
+
+# Go test files
+*_test.go
