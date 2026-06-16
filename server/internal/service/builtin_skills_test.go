@@ -1,6 +1,7 @@
 package service
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,6 +27,27 @@ const (
 	// maxDescriptionChars is the frontmatter description cap — it is the only
 	// thing an agent sees when deciding whether to load the skill.
 	maxDescriptionChars = 1024
+	// minSourceMapAnchors is the density floor for a built-in skill
+	// source-map. The densest existing maps cite 28+ file:line anchors; stub
+	// maps that only list file paths (no line numbers) have zero. This floor
+	// catches stubs decisively while leaving headroom so a well-anchored map
+	// does not break on a minor reformat.
+	minSourceMapAnchors = 12
+)
+
+// sourceMapAnchorRe matches the two citation styles used across the built-in
+// skill source-maps:
+//
+//   - inline `path/file.go:NN` anchors (the dominant style), and
+//   - table-column line ranges like `159–162` or `1124-1160` (used by maps
+//     that put the file path in a section header and the line range in a
+//     dedicated column).
+//
+// Both forms count equally toward minSourceMapAnchors.
+var sourceMapAnchorRe = regexp.MustCompile(
+	`\.(?:go|sql|ts|tsx|json|yaml):[0-9]` + // inline file:line citations
+		`|` +
+		`\d{2,4}[–-]\d{2,4}`, // table-column line ranges
 )
 
 // TestBuiltinSkillsConformToTemplate enforces the standard-template invariants
@@ -114,6 +136,42 @@ func TestBuiltinSkillsFrontmatterIsStrictYAML(t *testing.T) {
 			}
 			if desc, ok := fm["description"].(string); !ok || strings.TrimSpace(desc) == "" {
 				t.Errorf("frontmatter description must parse as a non-empty string, got %#v", fm["description"])
+			}
+		})
+	}
+}
+
+// TestBuiltinSkillSourceMapsAreAnchored is the anti-regression gate for
+// built-in skill source-maps. Each multica-* skill ships a
+// references/*-source-map.md that traces every SKILL.md claim to real
+// file:line citations and teaches the reader how to re-derive them. A map that
+// devolves into a bare file listing (no line numbers, no verification command)
+// silently turns the skill into an uncheckable assertion — this test catches
+// that drift in CI instead of in production.
+func TestBuiltinSkillSourceMapsAreAnchored(t *testing.T) {
+	skills := loadBuiltinSkills()
+	if len(skills) == 0 {
+		t.Fatal("no built-in skills loaded; embed or layout is broken")
+	}
+
+	for _, skill := range skills {
+		t.Run(skill.Name, func(t *testing.T) {
+			sm, ok := findSourceMap(skill)
+			if !ok {
+				t.Fatalf("skill has no references/*-source-map.md supporting file")
+			}
+
+			anchors := len(sourceMapAnchorRe.FindAllString(sm.Content, -1))
+			if anchors < minSourceMapAnchors {
+				t.Errorf("source-map has %d file:line anchors, want at least %d; "+
+					"trace each contract to a real code location, not just file paths",
+					anchors, minSourceMapAnchors)
+			}
+
+			if !sourceMapHasReDerivableCommand(sm.Content) {
+				t.Errorf("source-map has no re-derivable verification command; " +
+					"include a fenced ```bash block with grep/go test commands " +
+					"or describe the verification step inline")
 			}
 		})
 	}
@@ -531,6 +589,27 @@ func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 func skillHasFile(skill AgentSkillData, path string) bool {
 	for _, f := range skill.Files {
 		if f.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func findSourceMap(skill AgentSkillData) (AgentSkillFileData, bool) {
+	for _, f := range skill.Files {
+		if strings.HasPrefix(f.Path, "references/") && strings.HasSuffix(f.Path, "-source-map.md") {
+			return f, true
+		}
+	}
+	return AgentSkillFileData{}, false
+}
+
+func sourceMapHasReDerivableCommand(content string) bool {
+	if strings.Contains(content, "```bash") || strings.Contains(content, "```sh") {
+		return true
+	}
+	for _, cmd := range []string{"grep", "go test", "go build"} {
+		if strings.Contains(content, cmd) {
 			return true
 		}
 	}

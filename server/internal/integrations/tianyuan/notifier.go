@@ -26,6 +26,16 @@ const (
 // Notifier forwards selected Multica lifecycle events to a TianYuan Beichen
 // callback endpoint. It subscribes to the existing event bus and never participates
 // in task state transitions.
+//
+// Multi-replica delivery contract: the event bus (events.Bus) is an in-process
+// pub/sub with no cross-replica coordination. In a deployment with N server
+// replicas, every replica's Notifier subscribes independently and fires once
+// per event, so the SAME lifecycle event is delivered N times to the Beichen
+// endpoint. This is an at-least-once, per-replica contract, NOT exactly-once.
+// Downstream (Beichen) MUST be idempotent: dedupe on providerEventId, which is
+// built from multica:<type>:<id>:<updated_at> and is unique per transition.
+// (If Beichen cannot guarantee idempotency, a pg_advisory_lock leader guard
+// would be needed — tracked as a separate risk, not implemented here.)
 type Notifier struct {
 	callbackURL string
 	secret      string
@@ -43,9 +53,13 @@ type Config struct {
 }
 
 type CallbackEvent struct {
-	Schema          string           `json:"schema"`
-	CallbackKind    string           `json:"callbackKind"`
-	Provider        string           `json:"provider"`
+	Schema       string `json:"schema"`
+	CallbackKind string `json:"callbackKind"`
+	Provider     string `json:"provider"`
+	// ProviderEventID is the idempotency key for downstream dedup. Format:
+	// multica:<eventType>:<entityID>:<updated_at>. It is unique per lifecycle
+	// transition (updated_at is monotonic) but is NOT stable across replays
+	// of the same transition — dedupe on exact-string equality only.
 	ProviderEventID string           `json:"providerEventId"`
 	EventType       string           `json:"eventType"`
 	External        CallbackExternal `json:"external"`
@@ -56,7 +70,12 @@ type CallbackEvent struct {
 	AgentID         string           `json:"agentId,omitempty"`
 	OccurredAt      string           `json:"occurredAt"`
 	Summary         string           `json:"summary,omitempty"`
-	Payload         map[string]any   `json:"payload"`
+	// Payload is forwarded verbatim from the internal event bus payload.
+	// Its key set IS the outbound contract to Beichen: adding keys is a
+	// compatible change, but renaming or removing keys is breaking and must
+	// be coordinated downstream. There is no allowlist today — the entire
+	// internal payload shape is exposed (tracked as debt; see B3).
+	Payload map[string]any `json:"payload"`
 }
 
 type CallbackExternal struct {
@@ -106,9 +125,20 @@ func (n *Notifier) Enabled() bool {
 	return n != nil && n.callbackURL != ""
 }
 
+// Register subscribes the notifier to the lifecycle events it forwards.
+// Idempotent only against a fresh bus; call exactly once during server boot.
+//
+// See the Notifier type doc for the multi-replica delivery contract: each
+// replica delivers independently, so downstream must dedupe on providerEventId.
 func (n *Notifier) Register(bus *events.Bus) {
 	if !n.Enabled() {
 		return
+	}
+	if n.secret == "" {
+		// Warn-only: URL is the opt-in switch, so an unset secret does not
+		// disable delivery. But unsigned callbacks cannot be authenticated by
+		// Beichen — this must not ship to production.
+		n.logger.Warn("tianyuan notifier: CALLBACK_SECRET not set; callbacks will be UNSIGNED and unauthenticated — do not use in production")
 	}
 	for _, eventType := range []string{
 		protocol.EventIssueUpdated,
@@ -192,11 +222,12 @@ func (n *Notifier) issueCallbackEvent(e events.Event) (CallbackEvent, bool) {
 
 	identifier := stringFromMap(issue, "identifier")
 	title := stringFromMap(issue, "title")
+	updatedAt := stringFromMap(issue, "updated_at")
 	return CallbackEvent{
 		Schema:          beichenProviderCallbackSchema,
 		CallbackKind:    "provider.lifecycle",
 		Provider:        "multica",
-		ProviderEventID: fmt.Sprintf("multica:%s:%s", eventType, issueID),
+		ProviderEventID: fmt.Sprintf("multica:%s:%s:%s", eventType, issueID, updatedAt),
 		EventType:       eventType,
 		External: CallbackExternal{
 			WorkspaceID: e.WorkspaceID,
@@ -222,11 +253,12 @@ func (n *Notifier) taskCallbackEvent(e events.Event) (CallbackEvent, bool) {
 	}
 	issueID := stringFromMap(payload, "issue_id")
 	agentID := stringFromMap(payload, "agent_id")
+	updatedAt := stringFromMap(payload, "updated_at")
 	callback := CallbackEvent{
 		Schema:          beichenProviderCallbackSchema,
 		CallbackKind:    "provider.lifecycle",
 		Provider:        "multica",
-		ProviderEventID: fmt.Sprintf("multica:%s:%s", e.Type, taskID),
+		ProviderEventID: fmt.Sprintf("multica:%s:%s:%s", e.Type, taskID, updatedAt),
 		EventType:       e.Type,
 		External: CallbackExternal{
 			WorkspaceID: e.WorkspaceID,

@@ -118,6 +118,16 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # TianYuan / Beichen provider callback integration (optional).
+      # MULTICA_TIANYUAN_CALLBACK_URL is the opt-in switch: unset = disabled.
+      # When set, the server POSTs signed lifecycle callbacks (task/issue
+      # status) to the Beichen endpoint. Delivery is at-least-once PER REPLICA
+      # — every replica delivers independently, so the endpoint MUST dedupe on
+      # providerEventId. MULTICA_TIANYUAN_CALLBACK_SECRET enables HMAC-SHA256
+      # signing (x-tianyuan-signature) and is REQUIRED for production; leaving
+      # it empty sends UNSIGNED, unauthenticated callbacks.
+      MULTICA_TIANYUAN_CALLBACK_URL: ${MULTICA_TIANYUAN_CALLBACK_URL:-}
+      MULTICA_TIANYUAN_CALLBACK_SECRET: ${MULTICA_TIANYUAN_CALLBACK_SECRET:-}
     restart: unless-stopped
 
   frontend:

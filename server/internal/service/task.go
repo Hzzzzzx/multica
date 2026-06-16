@@ -3868,6 +3868,11 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		"agent_id": util.UUIDToString(task.AgentID),
 		"issue_id": util.UUIDToString(task.IssueID),
 		"status":   task.Status,
+		// updated_at is the transition emission moment. AgentTaskQueue has no
+		// single UpdatedAt column (only dispatched/started/completed, and none
+		// for failed/cancelled), so the broadcast moment is the uniform
+		// monotonic key downstream dedup (TianYuan providerEventId) relies on.
+		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)

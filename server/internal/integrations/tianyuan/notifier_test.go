@@ -50,10 +50,11 @@ func TestNotifierDeliversSignedTaskEvent(t *testing.T) {
 		Type:        protocol.EventTaskCompleted,
 		WorkspaceID: "workspace_1",
 		Payload: map[string]any{
-			"task_id":  "task_1",
-			"issue_id": "issue_1",
-			"agent_id": "agent_1",
-			"status":   "completed",
+			"task_id":    "task_1",
+			"issue_id":   "issue_1",
+			"agent_id":   "agent_1",
+			"status":     "completed",
+			"updated_at": "2026-06-14T00:00:00Z",
 		},
 	})
 
@@ -65,8 +66,11 @@ func TestNotifierDeliversSignedTaskEvent(t *testing.T) {
 		if event.Provider != "multica" {
 			t.Fatalf("provider = %q", event.Provider)
 		}
-		if event.ProviderEventID != "multica:task:completed:task_1" {
+		if event.ProviderEventID != "multica:task:completed:task_1:2026-06-14T00:00:00Z" {
 			t.Fatalf("providerEventId = %q", event.ProviderEventID)
+		}
+		if event.OccurredAt != "2026-06-14T00:00:00Z" {
+			t.Fatalf("occurredAt = %q, want injected Now", event.OccurredAt)
 		}
 		if event.WorkspaceID != "workspace_1" || event.IssueID != "issue_1" || event.TaskID != "task_1" {
 			t.Fatalf("unexpected refs: %#v", event)
@@ -118,6 +122,7 @@ func TestNotifierDeliversIssueDoneStatusEvent(t *testing.T) {
 				"identifier": "WOR-9",
 				"title":      "自动完成测试",
 				"status":     "done",
+				"updated_at": "2026-06-14T00:00:00Z",
 			},
 		},
 	})
@@ -127,11 +132,14 @@ func TestNotifierDeliversIssueDoneStatusEvent(t *testing.T) {
 		if event.Schema != beichenProviderCallbackSchema || event.CallbackKind != "provider.lifecycle" {
 			t.Fatalf("unexpected callback identity: %#v", event)
 		}
-		if event.ProviderEventID != "multica:issue.status.done:issue_1" {
+		if event.ProviderEventID != "multica:issue.status.done:issue_1:2026-06-14T00:00:00Z" {
 			t.Fatalf("providerEventId = %q", event.ProviderEventID)
 		}
 		if event.EventType != "issue.status.done" {
 			t.Fatalf("eventType = %q", event.EventType)
+		}
+		if event.OccurredAt != "2026-06-14T00:00:00Z" {
+			t.Fatalf("occurredAt = %q, want injected Now", event.OccurredAt)
 		}
 		if event.WorkspaceID != "workspace_1" || event.IssueID != "issue_1" || event.TaskID != "" {
 			t.Fatalf("unexpected refs: %#v", event)
@@ -144,6 +152,140 @@ func TestNotifierDeliversIssueDoneStatusEvent(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for callback")
+	}
+}
+
+func TestNotifierDisabledDoesNotDeliver(t *testing.T) {
+	hits := make(chan struct{}, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	bus := events.New()
+	notifier := NewNotifier(Config{CallbackURL: ""})
+	if notifier.Enabled() {
+		t.Fatal("notifier should be disabled with an empty callback URL")
+	}
+	notifier.Register(bus)
+
+	dispatched := make(chan struct{}, 1)
+	bus.SubscribeAll(func(events.Event) { dispatched <- struct{}{} })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: "ws",
+		Payload:     map[string]any{"task_id": "t1", "updated_at": "2026-06-14T00:00:00Z"},
+	})
+
+	select {
+	case <-dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("bus never dispatched the event")
+	}
+	select {
+	case <-hits:
+		t.Fatal("disabled notifier delivered a callback")
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+func TestNotifierTreatsNonOKAsFailure(t *testing.T) {
+	attempts := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts <- struct{}{}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	bus := events.New()
+	NewNotifier(Config{CallbackURL: server.URL, Secret: "s"}).Register(bus)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: "ws",
+		Payload:     map[string]any{"task_id": "t1", "updated_at": "2026-06-14T00:00:00Z"},
+	})
+
+	select {
+	case <-attempts:
+	case <-time.After(2 * time.Second):
+		t.Fatal("callback request was never attempted")
+	}
+	select {
+	case <-attempts:
+		t.Fatal("notifier retried after a non-2xx response")
+	default:
+	}
+}
+
+func TestMultipleNotifiersEachDeliver(t *testing.T) {
+	receivedA := make(chan CallbackEvent, 1)
+	receivedB := make(chan CallbackEvent, 1)
+	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var ev CallbackEvent
+		_ = json.Unmarshal(raw, &ev)
+		receivedA <- ev
+		w.WriteHeader(http.StatusOK)
+	}))
+	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var ev CallbackEvent
+		_ = json.Unmarshal(raw, &ev)
+		receivedB <- ev
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer serverA.Close()
+	defer serverB.Close()
+
+	bus := events.New()
+	NewNotifier(Config{CallbackURL: serverA.URL, Secret: "a"}).Register(bus)
+	NewNotifier(Config{CallbackURL: serverB.URL, Secret: "b"}).Register(bus)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: "ws",
+		Payload:     map[string]any{"task_id": "t1", "issue_id": "i1", "updated_at": "2026-06-14T00:00:00Z"},
+	})
+
+	for _, ch := range []chan CallbackEvent{receivedA, receivedB} {
+		select {
+		case ev := <-ch:
+			if ev.ProviderEventID != "multica:task:completed:t1:2026-06-14T00:00:00Z" {
+				t.Fatalf("providerEventId = %q", ev.ProviderEventID)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a subscribed notifier did not deliver (multi-replica contract)")
+		}
+	}
+}
+
+func TestNotifierOmitsSignatureWhenSecretEmpty(t *testing.T) {
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Get("x-tianyuan-signature")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	bus := events.New()
+	NewNotifier(Config{CallbackURL: server.URL}).Register(bus)
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: "ws",
+		Payload:     map[string]any{"task_id": "t1", "updated_at": "2026-06-14T00:00:00Z"},
+	})
+
+	select {
+	case sig := <-received:
+		if sig != "" {
+			t.Fatalf("expected empty signature header, got %q", sig)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("callback never delivered")
 	}
 }
 
