@@ -3595,6 +3595,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		})
 	}
 
+	return d.classifyTaskResult(result, env, provider, usageEntries, taskLog), nil
+}
+
+// classifyTaskResult maps an agent run result to the TaskResult that runTask
+// forwards to handleTask. Equivalent extraction of runTask's former status
+// switch (the only side effects are the taskLog Warn calls), pulled out so
+// each branch is unit-testable instead of reachable only via d.runner.
+func (d *Daemon) classifyTaskResult(
+	result agent.Result,
+	env *execenv.Environment,
+	provider string,
+	usageEntries []TaskUsageEntry,
+	taskLog *slog.Logger,
+) TaskResult {
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
@@ -3610,7 +3624,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,
 				Usage:     usageEntries,
-			}, nil
+			}
 		}
 		// Detect "poisoned" terminal output: the agent didn't reach a real
 		// conclusion but emitted a known fallback marker (iteration limit,
@@ -3631,7 +3645,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				EnvRoot:       env.RootDir,
 				Usage:         usageEntries,
 				FailureReason: reason,
-			}, nil
+			}
 		}
 		return TaskResult{
 			Status:    "completed",
@@ -3640,7 +3654,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
-		}, nil
+		}
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
 		// in sync even when the agent times out after building a session.
@@ -3665,7 +3679,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: failureReason,
 			Usage:         usageEntries,
-		}, nil
+		}
 	case "idle_watchdog":
 		// The idle watchdog force-stopped the run because the backend
 		// went silent (e.g. claude blocked on a tool call against a
@@ -3684,7 +3698,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: "idle_watchdog",
 			Usage:         usageEntries,
-		}, nil
+		}
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
 		// handleTask's cancelledByPoll branch already discards this result,
@@ -3698,7 +3712,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
-		}, nil
+		}
 	default:
 		errMsg := result.Error
 		if errMsg == "" {
@@ -3742,7 +3756,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			Usage:         usageEntries,
 			FailureReason: failureReason,
-		}, nil
+		}
 	}
 }
 
