@@ -236,8 +236,9 @@ func TestNotification_IssueCreated_NoAssignee(t *testing.T) {
 	}
 }
 
-// TestNotification_StatusChanged verifies that all subscribers except the actor
-// receive a "status_changed" notification when an issue status changes.
+// TestNotification_StatusChanged verifies that status transitions notify every
+// subscriber, including the actor. Agent/CLI handoffs often resolve back to the
+// coordinating member identity, and that member still needs the review signal.
 func TestNotification_StatusChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -272,7 +273,7 @@ func TestNotification_StatusChanged(t *testing.T) {
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "status test issue",
-				Status:      "in_progress",
+				Status:      "in_review",
 				Priority:    "medium",
 				CreatorType: "member",
 				CreatorID:   testUserID,
@@ -283,10 +284,17 @@ func TestNotification_StatusChanged(t *testing.T) {
 		},
 	})
 
-	// Actor (testUserID) should NOT get a notification
+	// Actor (testUserID) should also get a notification for review/blocking
+	// handoff statuses.
 	actorItems := inboxItemsForRecipient(t, queries, testUserID)
-	if len(actorItems) != 0 {
-		t.Fatalf("expected 0 inbox items for actor, got %d", len(actorItems))
+	if len(actorItems) != 1 {
+		t.Fatalf("expected 1 inbox item for actor, got %d", len(actorItems))
+	}
+	if actorItems[0].Type != "status_changed" {
+		t.Fatalf("expected actor type 'status_changed', got %q", actorItems[0].Type)
+	}
+	if actorItems[0].Severity != "action_required" {
+		t.Fatalf("expected actor severity 'action_required', got %q", actorItems[0].Severity)
 	}
 
 	// sub1 should get a status_changed notification
@@ -297,8 +305,8 @@ func TestNotification_StatusChanged(t *testing.T) {
 	if sub1Items[0].Type != "status_changed" {
 		t.Fatalf("expected type 'status_changed', got %q", sub1Items[0].Type)
 	}
-	if sub1Items[0].Severity != "info" {
-		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
+	if sub1Items[0].Severity != "action_required" {
+		t.Fatalf("expected severity 'action_required', got %q", sub1Items[0].Severity)
 	}
 	// Title is now just the issue title; details contain from/to
 	expectedTitle := "status test issue"

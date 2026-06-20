@@ -19,7 +19,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -54,6 +53,13 @@ func priorityLabel(p string) string {
 	return p
 }
 
+func statusChangeSeverity(status string) string {
+	if status == "blocked" || status == "in_review" {
+		return "action_required"
+	}
+	return "info"
+}
+
 var emptyDetails = []byte("{}")
 
 // parseMentions extracts mentions from markdown content.
@@ -78,19 +84,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -224,6 +230,7 @@ func notifySubscribers(
 	workspaceID string,
 	e events.Event,
 	exclude map[string]bool,
+	includeActor bool,
 	notifType string,
 	severity string,
 	title string,
@@ -231,7 +238,7 @@ func notifySubscribers(
 	details []byte,
 ) {
 	notified := notifyIssueSubscribers(ctx, queries, bus,
-		issueID, issueID, issueStatus, workspaceID, e, exclude,
+		issueID, issueID, issueStatus, workspaceID, e, exclude, includeActor,
 		notifType, severity, title, body, details)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
@@ -263,7 +270,7 @@ func notifySubscribers(
 	// points to the sub-issue so the user navigates to the actual change.
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	notifyIssueSubscribers(ctx, queries, bus,
-		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
+		parentID, issueID, issueStatus, workspaceID, e, parentExclude, includeActor,
 		notifType, severity, title, body, details)
 }
 
@@ -282,6 +289,7 @@ func notifyIssueSubscribers(
 	workspaceID string,
 	e events.Event,
 	exclude map[string]bool,
+	includeActor bool,
 	notifType string,
 	severity string,
 	title string,
@@ -315,7 +323,7 @@ func notifyIssueSubscribers(
 		subID := util.UUIDToString(sub.UserID)
 
 		// Skip the actor
-		if subID == e.ActorID {
+		if !includeActor && subID == e.ActorID {
 			continue
 		}
 
@@ -647,7 +655,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				exclude[*issue.AssigneeID] = true
 			}
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				exclude, "assignee_changed", "info",
+				exclude, false, "assignee_changed", "info",
 				issue.Title, "",
 				assigneeDetails)
 		}
@@ -659,7 +667,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Status,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "status_changed", "info",
+				nil, true, "status_changed", statusChangeSeverity(issue.Status),
 				issue.Title, "",
 				statusDetails)
 
@@ -679,7 +687,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Priority,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "priority_changed", "info",
+				nil, false, "priority_changed", "info",
 				issue.Title, "",
 				priorityDetails)
 		}
@@ -698,7 +706,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   newStartDateStr,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "start_date_changed", "info",
+				nil, false, "start_date_changed", "info",
 				issue.Title, "",
 				startDateDetails)
 		}
@@ -717,7 +725,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   newDueDateStr,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "due_date_changed", "info",
+				nil, false, "due_date_changed", "info",
 				issue.Title, "",
 				dueDateDetails)
 		}
@@ -794,7 +802,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
-			nil, "new_comment", "info",
+			nil, false, "new_comment", "info",
 			issueTitle, commentContent,
 			commentDetails)
 
@@ -914,7 +922,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorType:   "agent",
 				ActorID:     agentID,
 			},
-			exclude, "task_failed", "action_required",
+			exclude, false, "task_failed", "action_required",
 			issue.Title, "",
 			emptyDetails)
 	})
