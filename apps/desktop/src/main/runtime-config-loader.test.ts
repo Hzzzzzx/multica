@@ -18,18 +18,18 @@ describe("loadRuntimeConfig", () => {
         isDev: true,
         configPath,
         env: {
-          apiUrl: "http://localhost:8080",
-          wsUrl: "ws://localhost:8080/ws",
-          appUrl: "http://localhost:3000",
+          apiUrl: "http://localhost:18480",
+          wsUrl: "ws://localhost:18480/ws",
+          appUrl: "http://127.0.0.1:18430",
         },
       }),
     ).resolves.toEqual({
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "http://localhost:8080",
-        wsUrl: "ws://localhost:8080/ws",
-        appUrl: "http://localhost:3000",
+        apiUrl: "http://localhost:18480",
+        wsUrl: "ws://localhost:18480/ws",
+        appUrl: "http://127.0.0.1:18430",
       },
     });
   });

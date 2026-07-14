@@ -1,3 +1,9 @@
+import {
+  LOCAL_MULTICA_API_URL,
+  LOCAL_MULTICA_WEB_URL,
+  LOCAL_MULTICA_WS_URL,
+} from "./local-multica-endpoints";
+
 export interface RuntimeConfig {
   schemaVersion: 1;
   apiUrl: string;
@@ -20,11 +26,12 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   appUrl: "https://multica.ai",
 });
 
+/** Local self-host defaults — aligned with TianYuan Multica (18480/18430). */
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
-  apiUrl: "http://localhost:8080",
-  wsUrl: "ws://localhost:8080/ws",
-  appUrl: "http://localhost:3000",
+  apiUrl: LOCAL_MULTICA_API_URL,
+  wsUrl: LOCAL_MULTICA_WS_URL,
+  appUrl: LOCAL_MULTICA_WEB_URL,
 });
 
 export interface RuntimeConfigEnv {
@@ -110,12 +117,12 @@ export function deriveAppUrl(apiUrl: string): string {
   return trimTrailingSlash(url.toString());
 }
 
-// Dev variant: when the api host is the local backend (`localhost:8080` /
-// `127.0.0.1:8080`), the renderer is served from a different port (3000),
-// so deriving by host alone is wrong. Fall back to the local dev web URL
-// in that case; for any non-local host (e.g. a remote test environment),
-// trust the production-style derivation so `apiUrl=https://api.test.x`
-// yields `appUrl=https://test.x` without a separate VITE_APP_URL.
+// Dev variant: when the api host is the local backend (`127.0.0.1:18480` /
+// `localhost:18480`), the web UI is on FRONTEND_PORT (18430), so deriving
+// by host alone is wrong. Fall back to the local Multica web URL in that
+// case; for any non-local host (e.g. a remote test environment), trust the
+// production-style derivation so `apiUrl=https://api.test.x` yields
+// `appUrl=https://test.x` without a separate VITE_APP_URL.
 export function deriveDevAppUrl(apiUrl: string): string {
   const url = new URL(apiUrl);
   if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {

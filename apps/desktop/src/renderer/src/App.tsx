@@ -19,6 +19,8 @@ import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { tryLocalDevAutoLogin } from "./platform/local-dev-auto-login";
+import { isLocalMulticaHost } from "../../shared/local-multica-endpoints";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 
@@ -119,6 +121,7 @@ function AppContent() {
   // finishes, so IndexRedirect gets a definitive workspace state on
   // first render.
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [localAutoLoginTried, setLocalAutoLoginTried] = useState(false);
 
   const runtimeConfig = window.desktopAPI.runtimeConfig.ok
     ? window.desktopAPI.runtimeConfig.config
@@ -130,6 +133,51 @@ function AppContent() {
     if (!runtimeConfig) return;
     window.daemonAPI.setTargetApiUrl(runtimeConfig.apiUrl);
   }, [runtimeConfig]);
+
+  // Auth initialize can hang if Vite proxy still points at a dead port.
+  // On local Multica, force-clear loading after a few seconds so auto-login runs.
+  useEffect(() => {
+    if (!runtimeConfig) return;
+    if (!isLocalMulticaHost(runtimeConfig.apiUrl)) return;
+    if (!isLoading) return;
+    const timer = window.setTimeout(() => {
+      const state = useAuthStore.getState();
+      if (state.isLoading && !state.user) {
+        console.warn(
+          "[desktop] auth initialize still loading — forcing isLoading=false for local auto-login",
+        );
+        useAuthStore.setState({ isLoading: false });
+      }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [isLoading, runtimeConfig]);
+
+  // Local Multica (127.0.0.1 / localhost): auto dev-login — same contract as
+  // Android WebView + Beichen MCP. Cloud / remote APIs keep the login page.
+  useEffect(() => {
+    if (isLoading || user || bootstrapping || localAutoLoginTried) return;
+    if (!runtimeConfig) return;
+    if (!isLocalMulticaHost(runtimeConfig.apiUrl)) {
+      setLocalAutoLoginTried(true);
+      return;
+    }
+    setLocalAutoLoginTried(true);
+    setBootstrapping(true);
+    void (async () => {
+      try {
+        await tryLocalDevAutoLogin({
+          apiUrl: runtimeConfig.apiUrl,
+          queryClient: qc,
+        });
+      } catch (err) {
+        console.warn("[desktop] local Multica auto dev-login skipped:", err);
+        // Ensure we never stay on the pulse icon after a failed attempt.
+        useAuthStore.setState({ isLoading: false });
+      } finally {
+        setBootstrapping(false);
+      }
+    })();
+  }, [isLoading, user, bootstrapping, localAutoLoginTried, runtimeConfig, qc]);
 
   // Listen for invite IDs delivered via deep link (multica://invite/<id>).
   // We open the overlay regardless of login state — if the user isn't logged

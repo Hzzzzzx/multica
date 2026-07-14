@@ -85,6 +85,13 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
   "app.asar.unpacked",
 );
 
+// Local Multica + Vite must not go through system HTTP proxies (Clash etc.).
+// Otherwise [::1]/localhost traffic becomes 502 and Desktop sits on a spinner.
+app.commandLine.appendSwitch(
+  "proxy-bypass-list",
+  "<-loopback>;127.0.0.1;localhost;*.local;*.localhost",
+);
+
 // macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
 // the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
 // Run the user's login shell once to recover the real PATH so the bundled
@@ -594,7 +601,13 @@ if (!gotTheLock) {
       // keep dev URL overrides on the same source the renderer used before
       // runtime config moved endpoint resolution into main/preload.
       env: {
-        apiUrl: viteEnv.VITE_API_URL,
+        // In dev, route all API/WS traffic through the Vite dev-server proxy
+        // (same-origin) to avoid cross-origin fetch + Set-Cookie rejections.
+        // electron-vite.config.ts proxies /api, /auth, /ws → local Multica :18480.
+        // Use 127.0.0.1 (not localhost) so macOS system proxies don't capture [::1].
+        apiUrl: is.dev
+          ? `http://127.0.0.1:${Number(process.env.DESKTOP_RENDERER_PORT) || 5173}`
+          : viteEnv.VITE_API_URL,
         wsUrl: viteEnv.VITE_WS_URL,
         appUrl: viteEnv.VITE_APP_URL,
       },

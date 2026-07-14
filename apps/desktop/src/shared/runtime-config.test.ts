@@ -111,11 +111,12 @@ describe("runtime config", () => {
   });
 
   it("falls back to local web URL when dev apiUrl is localhost", () => {
-    expect(runtimeConfigFromDevEnv({ apiUrl: "http://localhost:8080" })).toEqual({
+    // Local Multica ports: API 18480 / Web 18430 (aligned with TianYuan).
+    expect(runtimeConfigFromDevEnv({ apiUrl: "http://localhost:18480" })).toEqual({
       schemaVersion: 1,
-      apiUrl: "http://localhost:8080",
-      wsUrl: "ws://localhost:8080/ws",
-      appUrl: "http://localhost:3000",
+      apiUrl: "http://localhost:18480",
+      wsUrl: "ws://localhost:18480/ws",
+      appUrl: "http://127.0.0.1:18430",
     });
   });
 
