@@ -50,10 +50,13 @@ export function proxy(req: NextRequest) {
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
-  // --- Dev auto-login: skip the login screen entirely ---
-  if (process.env.NODE_ENV === "development" && !hasSession &&
-      (pathname === "/" || pathname === "/login")) {
-    return NextResponse.redirect(new URL("/auth/dev-login", req.url));
+  // 本地嵌入（TianYuan Android 今日 WebView）需要真实登录页，不要自动
+  // /auth/dev-login 跳过登录。未登录访问营销首页时直接进 /login，干掉欢迎页。
+  // 需要自动登录时仍可手动打开 /auth/dev-login（仅非 production 可用）。
+  if (!hasSession && pathname === "/") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
   }
 
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---

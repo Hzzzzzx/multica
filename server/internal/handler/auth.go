@@ -650,8 +650,8 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // DevAutoLogin creates (or reuses) a dev user, sets auth cookies, and
-// redirects to "/". This lets local-development users skip the login screen
-// entirely. It is a no-op (404) when APP_ENV=production.
+// redirects to the Issues board (or ?redirect=). Local / Android embedded
+// WebView uses this to skip the login screen. No-op (404) when APP_ENV=production.
 func (h *Handler) DevAutoLogin(w http.ResponseWriter, r *http.Request) {
 	if isProductionEnv() {
 		writeError(w, http.StatusNotFound, "not found")
@@ -683,6 +683,15 @@ func (h *Handler) DevAutoLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: false,
 		SameSite: http.SameSiteLaxMode,
 	})
+	// 本地主 workspace，便于 proxy 与客户端直达 Issues 看板
+	http.SetCookie(w, &http.Cookie{
+		Name:     "last_workspace_slug",
+		Value:    "workspace",
+		Path:     "/",
+		MaxAge:   365 * 24 * 3600,
+		HttpOnly: false,
+		SameSite: http.SameSiteLaxMode,
+	})
 
 	slog.Info("dev auto-login", "user_id", uuidToString(user.ID), "email", user.Email, "is_new", isNew)
 
@@ -695,7 +704,11 @@ func (h *Handler) DevAutoLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	redirect := strings.TrimSpace(r.URL.Query().Get("redirect"))
+	if redirect == "" || !strings.HasPrefix(redirect, "/") || strings.HasPrefix(redirect, "//") {
+		redirect = "/workspace/issues"
+	}
+	http.Redirect(w, r, redirect, http.StatusFound)
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
