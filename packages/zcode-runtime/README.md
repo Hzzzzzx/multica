@@ -2,6 +2,8 @@
 
 Multica ↔ ZCode ACP bridge.
 
+> **Agent 交接 / 演进入口：** 见同目录 [`HANDOFF.md`](./HANDOFF.md)（架构决策、验收事实、坑、后续优先级）。
+
 Multica's daemon spawns this process and speaks **ACP** (JSON-RPC 2.0 NDJSON)
 over stdio. Each `session/prompt` is delegated to the **official ZCode CLI**:
 
