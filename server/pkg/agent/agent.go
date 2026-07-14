@@ -150,7 +150,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok, chrys)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok, chrys, zcode)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -246,8 +246,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &grokBackend{cfg: cfg}, nil
 	case "chrys":
 		return &chrysBackend{cfg: cfg}, nil
+	case "zcode":
+		return &zcodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, chrys)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok, chrys, zcode)", agentType)
 	}
 }
 
@@ -280,6 +282,7 @@ var launchHeaders = map[string]string{
 	"qoder":       "qodercli --acp",
 	"traecli":     "traecli acp serve",
 	"grok":        "grok agent stdio",
+	"zcode":       "zcode-runtime → zcode --prompt",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

@@ -273,6 +273,7 @@ function ChrysLogo({ className }: { className: string }) {
   );
 }
 
+<<<<<<< HEAD
 // Trae (ByteDance) — official mark, recreated from the official Trae icon and
 // recolored to brand green on transparent. Embedded as a data URI (same
 // approach as the Hermes logo) so the exact official artwork is used rather
@@ -295,6 +296,23 @@ function GrokLogo({ className }: { className: string }) {
         fill="#FFFFFF"
       />
       <path d="M16.8 16.8 14.2 14.1" stroke="#FFFFFF" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ZCode — placeholder "Z" mark (no PNG asset shipped yet)
+function ZCodeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0a0a1a" />
+      <path
+        d="M6 7h12l-8 10h8"
+        stroke="#3b82f6"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
     </svg>
   );
 }
@@ -341,6 +359,8 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "chrys":
       return <ChrysLogo className={className} />;
+    case "zcode":
+      return <ZCodeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

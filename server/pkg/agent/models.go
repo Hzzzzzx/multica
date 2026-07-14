@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -175,6 +176,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "chrys":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverChrysModels(ctx, executablePath)
+		})
+	case "zcode":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverZcodeModels(ctx)
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -851,6 +856,86 @@ func discoverChrysModels(ctx context.Context, executablePath string) ([]Model, e
 		tmpdirPrefix: "multica-chrys-discovery-",
 		acpArgs:      []string{"acp", "--agent", "Code", "--approval", "bypass"},
 	})
+}
+
+// discoverZcodeModels reads the model catalog shipped inside ZCode.app's
+// app.asar (Resources/model-providers/models_catalog_*.json). The catalog
+// lists every model ZCode can dispatch to, not just the ones the user's
+// z.ai account has access to (enforced server-side by z.ai).
+func discoverZcodeModels(ctx context.Context) ([]Model, error) {
+	appPath := os.Getenv("MULTICA_ZCODE_APP")
+	if appPath == "" {
+		appPath = "/Applications/ZCode.app"
+	}
+
+	catalogGlob := filepath.Join(appPath, "Contents", "Resources", "model-providers", "models_catalog_*.json")
+	matches, err := filepath.Glob(catalogGlob)
+	if err != nil {
+		return nil, fmt.Errorf("zcode: glob catalog: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("zcode: no model catalog at %s (is ZCode.app installed at %q?)", catalogGlob, appPath)
+	}
+
+	sort.Slice(matches, func(i, j int) bool { return matches[i] > matches[j] })
+	catalogPath := matches[0]
+
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, fmt.Errorf("zcode: read catalog %s: %w", catalogPath, err)
+	}
+
+	var catalog struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Models []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return nil, fmt.Errorf("zcode: parse catalog %s: %w", catalogPath, err)
+	}
+
+	var models []Model
+	for _, p := range catalog.Providers {
+		for _, m := range p.Models {
+			label := m.Name
+			if label == "" {
+				label = m.ID
+			}
+			// ZCode CLI headless path expects provider/model refs
+			// (e.g. bigmodel/glm-5.1, zai/glm-5.1). The on-disk catalog
+			// only stores bare model ids, so prefix with the provider.
+			id := m.ID
+			if p.ID != "" && !strings.Contains(m.ID, "/") {
+				id = p.ID + "/" + m.ID
+			}
+			models = append(models, Model{
+				ID:       id,
+				Label:    label,
+				Provider: p.ID,
+			})
+		}
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("zcode: catalog %s had no models", catalogPath)
+	}
+	// Prefer a bigmodel/zai coding-plan style default when present.
+	defaultSet := false
+	for i := range models {
+		if strings.HasPrefix(models[i].ID, "bigmodel/") || strings.HasPrefix(models[i].ID, "zai/") {
+			models[i].Default = true
+			defaultSet = true
+			break
+		}
+	}
+	if !defaultSet {
+		models[0].Default = true
+	}
+	return models, nil
 }
 
 // discoverCopilotModels spins up `copilot --acp` and reads the

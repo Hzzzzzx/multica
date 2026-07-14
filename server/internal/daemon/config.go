@@ -342,8 +342,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_CHRYS_PATH", "chrys", "MULTICA_CHRYS_MODEL"); ok {
 		agents["chrys"] = e
 	}
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode-runtime", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, traecli, grok, or chrys and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, traecli, grok, chrys, or zcode and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
