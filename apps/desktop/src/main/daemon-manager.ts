@@ -1066,9 +1066,17 @@ export function setupDaemonManager(
   getMainWindow = windowGetter;
 
   ipcMain.handle("daemon:set-target-api-url", async (_e, url: string) => {
-    const normalized = url || null;
+    // Renderer may pass Vite origin (127.0.0.1:5173) for same-origin fetch.
+    // Daemon must use Multica API directly so heartbeats match phone/web.
+    const { resolveDaemonServerUrl } = await import(
+      "../shared/local-multica-endpoints"
+    );
+    const normalized = url ? resolveDaemonServerUrl(url) : null;
     if (targetApiBaseUrl !== normalized) {
-      console.log(`[daemon] target API URL set to ${normalized ?? "(none)"}`);
+      console.log(
+        `[daemon] target API URL set to ${normalized ?? "(none)"}` +
+          (url && normalized !== url ? ` (from renderer ${url})` : ""),
+      );
       targetApiBaseUrl = normalized;
       invalidateActiveProfile();
       await pollOnce();
