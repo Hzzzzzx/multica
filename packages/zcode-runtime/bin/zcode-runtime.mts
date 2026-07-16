@@ -13,6 +13,7 @@ import process from "node:process";
 import { locateZcodeCli } from "../src/locate-cli.mts";
 import { startAcpServer } from "../src/acp-server.mts";
 import { createAcpHandlers, type MapperContext } from "../src/mapper.mts";
+import { runDoctor } from "../src/doctor.mts";
 
 const VERSION = "0.1.0";
 
@@ -53,6 +54,7 @@ const USAGE = `zcode-runtime ${VERSION} — Multica ↔ ZCode CLI ACP bridge
 
 Usage:
   zcode-runtime --workspace <path> [--model <provider/model>]
+  zcode-runtime doctor [--sync]
 
 Options:
   -w, --workspace <path>   Workspace directory (required for ACP sessions)
@@ -60,6 +62,9 @@ Options:
       --stdio              Use stdio transport (default)
   -h, --help               Show this help
   -V, --version            Print version
+
+Doctor options:
+      --sync               Copy an enabled desktop provider credential into CLI config
 
 Env:
   MULTICA_ZCODE_CLI        Path to zcode.cjs / zcode binary
@@ -69,7 +74,19 @@ Env:
 `;
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  if (argv[0] === "doctor") {
+    const doctorArgs = argv.slice(1);
+    if (doctorArgs.some((arg) => arg !== "--sync")) {
+      throw new Error(`unknown doctor flag: ${doctorArgs.find((arg) => arg !== "--sync")}`);
+    }
+    const result = await runDoctor({ sync: doctorArgs.includes("--sync") });
+    process.stdout.write(`${result.lines.join("\n")}\n`);
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
+  const args = parseArgs(argv);
   if (args.help) {
     process.stdout.write(USAGE);
     return;

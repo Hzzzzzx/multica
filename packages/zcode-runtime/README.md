@@ -2,8 +2,6 @@
 
 Multica ↔ ZCode ACP bridge.
 
-> **Agent 交接 / 演进入口：** 见同目录 [`HANDOFF.md`](./HANDOFF.md)（架构决策、验收事实、坑、后续优先级）。
-
 Multica's daemon spawns this process and speaks **ACP** (JSON-RPC 2.0 NDJSON)
 over stdio. Each `session/prompt` is delegated to the **official ZCode CLI**:
 
@@ -28,6 +26,17 @@ node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs \
 ```bash
 zcode-runtime --workspace /path/to/project [--model bigmodel/glm-5.1] --stdio
 ```
+
+Check the local CLI and credential setup without printing secrets:
+
+```bash
+zcode-runtime doctor
+# Explicitly copy the enabled desktop provider credential into CLI config:
+zcode-runtime doctor --sync
+```
+
+`--sync` preserves unrelated CLI settings, writes the config atomically with
+mode `0600`, and never prints the API key.
 
 Env:
 

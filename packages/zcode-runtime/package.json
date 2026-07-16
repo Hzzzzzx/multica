@@ -19,6 +19,7 @@
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

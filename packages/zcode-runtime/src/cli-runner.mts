@@ -9,10 +9,11 @@
 //   ~/.zcode/cli/config.json. We therefore load the file config and inject
 //   the matching provider key when Multica (or --model) picks a model.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import type { ZcodeCliPaths } from "./locate-cli.mts";
 import { cliLaunchPrefix } from "./locate-cli.mts";
 
@@ -147,14 +148,14 @@ export async function runZcodePrompt(
   const env = await buildChildEnv(opts.model);
 
   return new Promise((resolve, reject) => {
-    let child: ChildProcessWithoutNullStreams;
+    let child: ChildProcessByStdio<null, Readable, Readable>;
     try {
       child = spawn(prefix[0]!, args, {
         cwd: opts.workspace,
         env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
-      }) as ChildProcessWithoutNullStreams;
+      });
     } catch (err) {
       reject(err);
       return;

@@ -72,3 +72,6 @@ data/
 graphify-out/
 
 .gstack/
+
+# local dev database
+multica.db
