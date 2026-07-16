@@ -14,6 +14,7 @@ var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
+	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
@@ -25,6 +26,38 @@ var MinVersions = map[string]string{
 // screenshot URLs. Treated as a hard requirement: missing / unparsable / below
 // this threshold all fail closed.
 const MinQuickCreateCLIVersion = "0.2.21"
+
+// MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders
+// the assignment handoff note into the run's opening prompt + issue_context.md
+// (MUL-3375). Unlike quick-create this is a SOFT gate: assigning an issue with
+// a note never fails on an old daemon — the assignment still takes effect, the
+// note is simply dropped. The frontend reads HandoffSupported to gray out the
+// note box and warn the user, so they aren't surprised by a silently ignored
+// note. Bump this to the release that actually ships the daemon rendering.
+const MinHandoffCLIVersion = "0.3.28"
+
+// HandoffSupported reports whether a daemon reporting cliVersion is new enough
+// to render handoff notes. Reuses the CheckMinCLIVersion parsing (including the
+// git-describe dev-build exemption) but never errors — a missing/old/unparsable
+// version simply means "not supported", which the soft gate degrades gracefully.
+func HandoffSupported(cliVersion string) bool {
+	d := strings.TrimSpace(cliVersion)
+	if d == "" {
+		return false
+	}
+	if devDescribeRe.MatchString(d) {
+		return true
+	}
+	parsed, err := parseSemver(d)
+	if err != nil {
+		return false
+	}
+	min, err := parseSemver(MinHandoffCLIVersion)
+	if err != nil {
+		return false
+	}
+	return !parsed.lessThan(min)
+}
 
 // Errors returned by CheckMinCLIVersion. Callers branch on these to surface
 // "needs upgrade" vs "version not reported" with the right user message.
