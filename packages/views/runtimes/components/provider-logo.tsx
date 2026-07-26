@@ -317,19 +317,20 @@ function ChrysLogo({ className }: { className: string }) {
   );
 }
 
-// ZCode — placeholder "Z" mark (no PNG asset shipped yet)
-function ZCodeLogo({ className }: { className: string }) {
+// WorkBuddy — product-specific tile. The runtime uses WorkBuddy's bundled
+// engine and account even though its stream protocol is shared with CodeBuddy.
+function WorkBuddyLogo({ className }: { className: string }) {
+  const gradientId = `workbuddy-logo-gradient-${useId().replace(/:/g, "")}`;
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect width="24" height="24" rx="5" fill="#0a0a1a" />
-      <path
-        d="M6 7h12l-8 10h8"
-        stroke="#3b82f6"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-label="WorkBuddy">
+      <defs>
+        <linearGradient id={gradientId} x1="3" y1="2" x2="21" y2="22" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#6C5CE7" />
+          <stop offset="1" stopColor="#2563EB" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="5" fill={`url(#${gradientId})`} />
+      <path d="M5.5 6.5h2.7l1.5 7.1 1.5-5.2h1.9l1.5 5.2 1.5-7.1h2.4L16.1 18h-2.5l-1.5-5-1.5 5H8L5.5 6.5Z" fill="white" />
     </svg>
   );
 }
@@ -483,8 +484,8 @@ export function ProviderLogo({
       return <ZeroClawLogo className={className} />;
     case "chrys":
       return <ChrysLogo className={className} />;
-    case "zcode":
-      return <ZCodeLogo className={className} />;
+    case "workbuddy":
+      return <WorkBuddyLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -19,6 +19,26 @@ import (
 // and runContext for zero-timeout = no-deadline semantics.
 type codebuddyBackend struct {
 	cfg Config
+	// defaultExecutable / providerLabel are set from a BuiltinRuntime
+	// descriptor (WorkBuddy) and otherwise keep the CodeBuddy defaults.
+	defaultExecutable string
+	providerLabel     string
+}
+
+// providerName / defaultExecutableName keep the CodeBuddy defaults until a
+// descriptor override lands.
+func (b *codebuddyBackend) providerName() string {
+	if b.providerLabel != "" {
+		return b.providerLabel
+	}
+	return "codebuddy"
+}
+
+func (b *codebuddyBackend) defaultExecutableName() string {
+	if b.defaultExecutable != "" {
+		return b.defaultExecutable
+	}
+	return "codebuddy"
 }
 
 // codebuddyBlockedArgs are flags hardcoded by the daemon that must not be
@@ -94,12 +114,13 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 }
 
 func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	provider := b.providerName()
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "codebuddy"
+		execPath = b.defaultExecutableName()
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("codebuddy executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", provider, execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -135,7 +156,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 	}()
 
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
+	launch, launchEnv, err := buddyLaunchCommand(b.cfg, execPath)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd := launch.exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
@@ -146,22 +172,22 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	// cross-turn task_notification events. Force CodeBuddy's documented
 	// headless disable so Bash/PowerShell/Agent never take the background
 	// path (CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS; see CLI headless docs).
-	cmd.Env = buildCodebuddyEnv(b.cfg.Env)
+	cmd.Env = buildCodebuddyEnv(mergeLaunchEnv(b.cfg.Env, launchEnv))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("codebuddy stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", provider, err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("codebuddy stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", provider, err)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "["+provider+":stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
@@ -170,7 +196,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		return nil, fmt.Errorf("start codebuddy: %w", err)
 	}
 
-	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model, "provider", provider)
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -330,7 +356,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			completionGuardError = "codebuddy emitted a background task system event; Multica-managed runs require foreground execution (set CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS=1)"
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
-			"codebuddy",
+			provider,
 			timeout,
 			runCtx.Err(),
 			writeErr,
@@ -358,10 +384,10 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// rejection phrases often land only on stderr (mirror Claude MUL-4966).
 		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "codebuddy", stderrTail)
+			finalError = withAgentStderr(finalError, provider, stderrTail)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
-			provider:                   "codebuddy",
+			provider:                   provider,
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
 			exitCode:                   streamProcessExitCode(exitErr),

@@ -19,8 +19,8 @@ import (
 // subcommand; overriding it would break the daemon↔chrys communication
 // contract.
 var chrysBlockedArgs = map[string]blockedArgMode{
-	"acp":       blockedStandalone,
-	"--agent":   blockedWithValue,
+	"acp":        blockedStandalone,
+	"--agent":    blockedWithValue,
 	"--approval": blockedWithValue,
 	"--workdir":  blockedWithValue,
 }
@@ -381,5 +381,3 @@ func buildChrysSessionParams(cwd, model string, mcpServers []any) map[string]any
 	}
 	return params
 }
-
-

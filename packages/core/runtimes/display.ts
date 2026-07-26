@@ -51,6 +51,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   mcode: "MiniMax Code",
   muse: "Muse Code",
   omp: "Oh-My-Pi",
+  workbuddy: "WorkBuddy",
   zeroclaw: "ZeroClaw",
 };
 

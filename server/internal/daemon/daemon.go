@@ -317,7 +317,7 @@ var (
 	// real agent helpers so tests can run the registration path without
 	// shelling out to a real CLI. Mirrors the pattern used for the brew
 	// helpers above.
-	detectAgentVersion   = agent.DetectVersion
+	detectAgentVersion   = detectVersionWorkbuddyAware
 	checkAgentMinVersion = agent.CheckMinVersion
 
 	// listModels is an indirection over agent.ListModels so model-discovery
@@ -6508,6 +6508,17 @@ func init() {
 	for _, desc := range agent.BuiltinRuntimes {
 		runtimeDisplayNameOverrides[desc.ID] = desc.DisplayName
 	}
+}
+
+// detectVersionWorkbuddyAware routes version probes for WorkBuddy's
+// app-bundled engine CLI through the Electron-as-Node launcher (a GUI daemon
+// has no shell-installed node, so the bundled Node script cannot run through
+// its shebang). Every other path uses the plain CLI probe.
+func detectVersionWorkbuddyAware(ctx context.Context, cmd agent.Command) (string, error) {
+	if version, handled, err := agent.DetectWorkbuddyVersion(ctx, cmd); handled {
+		return version, err
+	}
+	return agent.DetectVersion(ctx, cmd)
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.

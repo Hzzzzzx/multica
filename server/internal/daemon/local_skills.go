@@ -131,6 +131,20 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
 	}
 
+	// WorkBuddy exposes three user-level stores. Explicitly installed skills
+	// win over connector skills, which win over the marketplace catalog when
+	// keys collide; ~/.agents/skills remains the shared fallback. These paths
+	// are part of WorkBuddy's shipped product config, so they are listed here
+	// ahead of the descriptor's single-root resolution.
+	if provider == "workbuddy" {
+		return []localSkillRoot{
+			{path: filepath.Join(home, ".workbuddy", "skills"), kind: localSkillRootProvider},
+			{path: filepath.Join(home, ".workbuddy", "connectors", "skills"), kind: localSkillRootProvider},
+			{path: filepath.Join(home, ".workbuddy", "skills-marketplace", "skills"), kind: localSkillRootProvider},
+			{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal},
+		}, true, nil
+	}
+
 	var providerRoot string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the

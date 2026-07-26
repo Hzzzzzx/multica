@@ -97,6 +97,23 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
 	},
+	{
+		// TianYuan downstream: WorkBuddy Desktop bundles a CodeBuddy-compatible
+		// stream-json engine (and its own account, model catalog, and skill
+		// stores) inside the macOS app. Launches go through the app's Electron
+		// binary — see workbuddy.go.
+		ID:                "workbuddy",
+		ProtocolFamily:    "codebuddy",
+		DefaultCommand:    "workbuddy",
+		EnvPrefix:         "MULTICA_WORKBUDDY",
+		DisplayName:       "WorkBuddy",
+		SkillsDir:         ".workbuddy/skills",
+		UserSkillsDir:     ".workbuddy/skills",
+		LaunchHeader:      "workbuddy (stream-json)",
+		DefaultExecutable: "workbuddy",
+		ProviderLabel:     "workbuddy",
+		ModelDiscovery:    discoverWorkbuddyModels,
+	},
 }
 
 // BuiltinRuntimeByID returns the descriptor for the given runtime identity,
@@ -140,6 +157,13 @@ type backendOverrideApplicator interface {
 // providerLabel fields. The method is defined here (not in pi.go) to keep
 // the descriptor→backend contract in one file.
 func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+}
+
+// codebuddyBackend carries the same override surface so WorkBuddy (a
+// CodeBuddy-compatible engine) can host under the codebuddy family.
+func (b *codebuddyBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
 }

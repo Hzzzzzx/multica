@@ -172,6 +172,22 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				}
 			}
 		}
+		if defaultCmd == "workbuddy" && cmd == defaultCmd {
+			// WorkBuddy Desktop bundles its headless stream-json engine inside
+			// the macOS app rather than installing a `workbuddy` binary on
+			// PATH. The entry's Path points at the bundled CLI script; the
+			// codebuddy-family launch path rewrites it through the app's
+			// Electron binary (see pkg/agent/workbuddy.go).
+			for _, p := range agent.WorkbuddyAppBundlePaths() {
+				if executableCandidate(p) {
+					return AgentEntry{
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 
@@ -341,8 +357,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_CHRYS_PATH", "chrys", "MULTICA_CHRYS_MODEL"); ok {
 		agents["chrys"] = e
 	}
-	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode-runtime", "MULTICA_ZCODE_MODEL"); ok {
-		agents["zcode"] = e
+	// WorkBuddy Desktop bundles its engine CLI inside the macOS app instead
+	// of installing a `workbuddy` binary on PATH. The bundled script is a
+	// Node script launched through the app's Electron binary (workbuddy.go);
+	// discovery still requires the executable bit so an entry that could not
+	// spawn is never advertised as a healthy runtime.
+	if e, ok := probe("MULTICA_WORKBUDDY_PATH", "workbuddy", "MULTICA_WORKBUDDY_MODEL"); ok {
+		agents["workbuddy"] = e
 	}
 	return agents
 }
