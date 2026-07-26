@@ -39,12 +39,15 @@ func TestReportTianYuanOriginUsesExactNativeSessionAndIssue(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	err := ReportTianYuanOrigin(context.Background(), Config{TianYuanOriginReportURL: srv.URL, TianYuanOriginReportPathKey: "path-key"}, Task{ID: "task-1", IssueID: "issue-1", ProjectTitle: "Project"}, "codex", "thread-1", "/does/not/exist", nil)
+	err := ReportTianYuanOrigin(context.Background(), Config{TianYuanOriginReportURL: srv.URL, TianYuanOriginReportPathKey: "path-key"}, Task{ID: "task-1", IssueID: "issue-1", ProjectID: "project-1"}, "codex", "thread-1", "/does/not/exist", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got["provider"] != "codex" || got["nativeSessionId"] != "thread-1" || got["originKind"] != "multica_issue" || got["originId"] != "issue-1" {
 		t.Fatalf("unexpected payload: %#v", got)
+	}
+	if got["projectIdentity"] != "project-1" || got["canonicalProjectRoot"] != nil {
+		t.Fatalf("unexpected project payload: %#v", got)
 	}
 }
 

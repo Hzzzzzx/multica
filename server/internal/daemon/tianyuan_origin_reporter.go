@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -64,11 +63,6 @@ func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, 
 	}
 	if task.ProjectID != "" {
 		payload["projectIdentity"] = task.ProjectID
-	}
-	if observedCwd != "" {
-		if root, err := filepath.EvalSymlinks(observedCwd); err == nil {
-			payload["canonicalProjectRoot"] = root
-		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
