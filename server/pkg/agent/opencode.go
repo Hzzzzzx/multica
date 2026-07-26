@@ -534,7 +534,10 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			stepHasContinuationTool = false
 			awaitingContinuation = false
 			stepProducedOutput = false
-			trySend(ch, Message{Type: MessageStatus, Status: "running"})
+			// The session id may arrive on this event before any text/tool event.
+			// Keep it on the initial status so the daemon can pin the native
+			// resume pointer at the earliest provider-confirmed point.
+			trySend(ch, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		case "step_finish":
 			openStep = false
 			sawStepFinish = true

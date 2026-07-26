@@ -67,6 +67,17 @@ func TestOpencodeHandleTextEventEmpty(t *testing.T) {
 	}
 }
 
+func TestOpencodeStepStartPublishesNativeSessionID(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Message, 2)
+	(&opencodeBackend{}).processEvents(strings.NewReader(`{"type":"step_start","sessionID":"ses_native"}`+"\n"), ch)
+	msg := <-ch
+	if msg.Type != MessageStatus || msg.Status != "running" || msg.SessionID != "ses_native" {
+		t.Fatalf("unexpected status: %#v", msg)
+	}
+}
+
 // ── Tool use event tests (real opencode schema) ──
 
 func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {

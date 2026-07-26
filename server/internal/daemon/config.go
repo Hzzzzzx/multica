@@ -116,6 +116,12 @@ type Config struct {
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
+
+	// TianYuan downstream: optional loopback endpoint recording provider-
+	// native task sessions (see tianyuan_origin_reporter.go). Empty keeps the
+	// integration off.
+	TianYuanOriginReportURL     string
+	TianYuanOriginReportPathKey string
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -623,6 +629,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoReloadEnabled = false
 	}
 
+	tianYuanOriginReportURL := strings.TrimSpace(os.Getenv("TIANYUAN_ORIGIN_REPORT_URL"))
+	if tianYuanOriginReportURL != "" {
+		u, err := url.Parse(tianYuanOriginReportURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return Config{}, fmt.Errorf("invalid TIANYUAN_ORIGIN_REPORT_URL")
+		}
+	}
+
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
 		DaemonID:                        daemonID,
@@ -649,6 +663,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateEnabled:               autoUpdateEnabled,
 		AutoUpdateCheckInterval:         autoUpdateInterval,
 		AutoReloadEnabled:               autoReloadEnabled,
+		TianYuanOriginReportURL:         tianYuanOriginReportURL,
+		TianYuanOriginReportPathKey:     strings.TrimSpace(os.Getenv("TIANYUAN_ORIGIN_REPORT_PATH_KEY")),
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		PollInterval:                    pollInterval,

@@ -436,6 +436,9 @@ type Daemon struct {
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
+	// sessionOrigins is populated only while a task is executing so the
+	// message-drain path can report a successfully pinned native session.
+	sessionOrigins sync.Map // task id -> taskOrigin
 
 	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
 	// (e.g. on Windows) is logged once rather than on every repo refresh.
@@ -745,6 +748,11 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+}
+
+type taskOrigin struct {
+	task     Task
+	provider string
 }
 
 type profileLaunchSpec struct {
@@ -8857,6 +8865,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
+	d.sessionOrigins.Store(task.ID, taskOrigin{task: task, provider: provider})
+	defer d.sessionOrigins.Delete(task.ID)
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
@@ -9748,6 +9758,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
 								taskLog.Debug("pin session failed", "error", err)
+							} else if origin, ok := d.sessionOrigins.Load(taskID); ok {
+								if err := reportTianYuanOrigin(pinCtx, d.cfg, origin.(taskOrigin).task, origin.(taskOrigin).provider, sid, wd, taskLog); err != nil {
+									// This optional local integration must never change task state.
+									taskLog.Warn("TianYuan origin reporting degraded", "error", err)
+								}
 							}
 						}()
 					}

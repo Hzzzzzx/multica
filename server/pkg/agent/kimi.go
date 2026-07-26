@@ -299,6 +299,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		c.sessionID = sessionID
+		// Surface the native session id before sending the prompt so callers can
+		// persist the exact resume pointer even when the prompt never completes.
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		b.cfg.Logger.Info("kimi session created", "session_id", sessionID)
 
 		// 3. If the caller picked a model (via agent.model from the
