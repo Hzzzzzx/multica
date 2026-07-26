@@ -316,6 +316,27 @@ WHERE agent_id = @agent_id
 ORDER BY created_at DESC, id DESC
 LIMIT @page_limit;
 
+-- name: ListTianYuanSessionOriginsForDaemon :many
+-- Deliberately excludes task context, prompt, result, and error content.
+-- This is an explicit operator-only backfill source for exact native sessions.
+SELECT
+    atq.id AS task_id,
+    atq.issue_id,
+    ar.provider,
+    atq.session_id,
+    atq.work_dir,
+    atq.created_at AS captured_at,
+    i.project_id,
+    p.title AS project_title
+FROM agent_task_queue atq
+JOIN agent_runtime ar ON ar.id = atq.runtime_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN project p ON p.id = i.project_id
+WHERE ar.daemon_id = $1
+  AND atq.session_id IS NOT NULL
+  AND atq.session_id <> ''
+ORDER BY atq.created_at ASC;
+
 -- name: CreateAgentTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 -- locks the owners' workspace rows in the writer's own transaction and returns

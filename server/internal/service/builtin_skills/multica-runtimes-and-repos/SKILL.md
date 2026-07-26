@@ -29,6 +29,12 @@ after it has persisted a provider-native session id, and a reporting failure is
 degraded telemetry that never fails the agent task. Provider CLIs do not receive
 these values.
 
+Historical exact mappings are replayed only by an operator using
+`multica daemon replay-tianyuan-session-origins`. It reads content-free task
+identity metadata with a non-empty persisted native session ID, continues after
+individual reporter failures, and prints only scanned/reported/skipped/failed
+counts.
+
 ## Core model
 
 A runtime is the execution target behind an agent. A daemon owns local runtime processes and claims queued tasks from the server.

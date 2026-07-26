@@ -439,6 +439,7 @@ type Daemon struct {
 	// sessionOrigins is populated only while a task is executing so the
 	// message-drain path can report a successfully pinned native session.
 	sessionOrigins sync.Map // task id -> taskOrigin
+	originReporter func(context.Context, Config, Task, string, string, string, *slog.Logger) error
 
 	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
 	// (e.g. on Windows) is logged once rather than on every repo refresh.
@@ -753,6 +754,19 @@ type Daemon struct {
 type taskOrigin struct {
 	task     Task
 	provider string
+}
+
+func (d *Daemon) reportPinnedTianYuanOrigin(ctx context.Context, taskID, sessionID, workDir string, logger *slog.Logger) error {
+	origin, ok := d.sessionOrigins.Load(taskID)
+	if !ok {
+		return nil
+	}
+	reporter := d.originReporter
+	if reporter == nil {
+		reporter = ReportTianYuanOrigin
+	}
+	value := origin.(taskOrigin)
+	return reporter(ctx, d.cfg, value.task, value.provider, sessionID, workDir, logger)
 }
 
 type profileLaunchSpec struct {
@@ -9758,8 +9772,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
 								taskLog.Debug("pin session failed", "error", err)
-							} else if origin, ok := d.sessionOrigins.Load(taskID); ok {
-								if err := reportTianYuanOrigin(pinCtx, d.cfg, origin.(taskOrigin).task, origin.(taskOrigin).provider, sid, wd, taskLog); err != nil {
+							} else {
+								if err := d.reportPinnedTianYuanOrigin(pinCtx, taskID, sid, wd, taskLog); err != nil {
 									// This optional local integration must never change task state.
 									taskLog.Warn("TianYuan origin reporting degraded", "error", err)
 								}

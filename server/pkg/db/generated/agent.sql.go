@@ -6445,6 +6445,68 @@ func (q *Queries) ListUserAgentsByRuntimeForUpdate(ctx context.Context, runtimeI
 	return items, nil
 }
 
+const listTianYuanSessionOriginsForDaemon = `-- name: ListTianYuanSessionOriginsForDaemon :many
+SELECT
+    atq.id AS task_id,
+    atq.issue_id,
+    ar.provider,
+    atq.session_id,
+    atq.work_dir,
+    atq.created_at AS captured_at,
+    i.project_id,
+    p.title AS project_title
+FROM agent_task_queue atq
+JOIN agent_runtime ar ON ar.id = atq.runtime_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN project p ON p.id = i.project_id
+WHERE ar.daemon_id = $1
+  AND atq.session_id IS NOT NULL
+  AND atq.session_id <> ''
+ORDER BY atq.created_at ASC
+`
+
+type ListTianYuanSessionOriginsForDaemonRow struct {
+	TaskID       pgtype.UUID        `json:"task_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	Provider     string             `json:"provider"`
+	SessionID    pgtype.Text        `json:"session_id"`
+	WorkDir      pgtype.Text        `json:"work_dir"`
+	CapturedAt   pgtype.Timestamptz `json:"captured_at"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	ProjectTitle pgtype.Text        `json:"project_title"`
+}
+
+// Deliberately excludes task context, prompt, result, and error content.
+// This is an explicit operator-only backfill source for exact native sessions.
+func (q *Queries) ListTianYuanSessionOriginsForDaemon(ctx context.Context, daemonID pgtype.Text) ([]ListTianYuanSessionOriginsForDaemonRow, error) {
+	rows, err := q.db.Query(ctx, listTianYuanSessionOriginsForDaemon, daemonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTianYuanSessionOriginsForDaemonRow{}
+	for rows.Next() {
+		var i ListTianYuanSessionOriginsForDaemonRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.IssueID,
+			&i.Provider,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.CapturedAt,
+			&i.ProjectID,
+			&i.ProjectTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceAgentTaskSnapshot = `-- name: ListWorkspaceAgentTaskSnapshot :many
 SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name, atq.durable_work_dir, atq.channel_context_revision, atq.comment_thread_id, atq.cancelled_by_type, atq.cancelled_by_id, atq.cancelled_by_name, atq.issue_snapshot, atq.workflow_step FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id

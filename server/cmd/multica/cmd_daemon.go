@@ -95,6 +95,12 @@ var daemonDiskUsageCmd = &cobra.Command{
 	RunE: runDaemonDiskUsage,
 }
 
+var daemonReplayTianYuanSessionOriginsCmd = &cobra.Command{
+	Use:   "replay-tianyuan-session-origins",
+	Short: "Replay exact persisted native sessions to the configured TianYuan endpoint",
+	RunE:  runDaemonReplayTianYuanSessionOrigins,
+}
+
 func init() {
 	f := daemonStartCmd.Flags()
 	f.Bool("foreground", false, "Run in the foreground instead of background")
@@ -151,6 +157,36 @@ func init() {
 	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+	daemonCmd.AddCommand(daemonReplayTianYuanSessionOriginsCmd)
+}
+
+func runDaemonReplayTianYuanSessionOrigins(cmd *cobra.Command, _ []string) error {
+	profile := resolveProfile(cmd)
+	cfg, err := daemon.LoadConfig(daemon.Overrides{Profile: profile})
+	if err != nil {
+		return err
+	}
+	if cfg.TianYuanOriginReportURL == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "scanned=0 reported=0 skipped=0 failed=0 (TianYuan reporting disabled)")
+		return nil
+	}
+	cliCfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	client := daemon.NewClient(cfg.ServerBaseURL)
+	client.SetToken(cliCfg.Token)
+	rows, err := client.ListTianYuanSessionOrigins(cmd.Context())
+	if err != nil {
+		return err
+	}
+	counts := daemon.ReplayTianYuanSessionOrigins(cmd.Context(), cfg, rows, reportTianYuanOriginForCLI, slog.Default())
+	fmt.Fprintf(cmd.OutOrStdout(), "scanned=%d reported=%d skipped=%d failed=%d\n", counts.Scanned, counts.Reported, counts.Skipped, counts.Failed)
+	return nil
+}
+
+func reportTianYuanOriginForCLI(ctx context.Context, cfg daemon.Config, task daemon.Task, provider, sessionID, cwd string, logger *slog.Logger) error {
+	return daemon.ReportTianYuanOrigin(ctx, cfg, task, provider, sessionID, cwd, logger)
 }
 
 type daemonRuntimeProbe struct {

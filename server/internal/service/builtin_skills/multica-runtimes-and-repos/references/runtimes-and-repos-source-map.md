@@ -5,6 +5,8 @@
 - Config and opt-in environment variables: `server/internal/daemon/config.go`
 - Post-pin payload and local HTTP boundary: `server/internal/daemon/tianyuan_origin_reporter.go`
 - Pin-success integration: `server/internal/daemon/daemon.go`
+- Explicit replay command: `server/cmd/multica/cmd_daemon.go`
+- Content-free exact-session query: `server/pkg/db/queries/agent.sql`
 
 - `server/cmd/multica/cmd_runtime.go` registers `runtime list`, `usage`, `activity`, `update`, and `delete`.
 - `runtime list` reads `/api/runtimes` and prints `id`, `name`, `runtime_mode`, `provider`, `status`, and `last_seen_at`.

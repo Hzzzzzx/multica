@@ -12,9 +12,34 @@ import (
 	"time"
 )
 
-// reportTianYuanOrigin is deliberately daemon-owned: providers expose only a
+type TianYuanReplayCounts struct{ Scanned, Reported, Skipped, Failed int }
+
+// ReplayTianYuanSessionOrigins processes only the content-free rows returned
+// by the explicit daemon API. It is never called during daemon startup.
+func ReplayTianYuanSessionOrigins(ctx context.Context, cfg Config, rows []SessionOrigin, report func(context.Context, Config, Task, string, string, string, *slog.Logger) error, logger *slog.Logger) TianYuanReplayCounts {
+	counts := TianYuanReplayCounts{Scanned: len(rows)}
+	if cfg.TianYuanOriginReportURL == "" {
+		counts.Skipped = len(rows)
+		return counts
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) == "" || strings.TrimSpace(row.Provider) == "" {
+			counts.Skipped++
+			continue
+		}
+		task := Task{ID: row.TaskID, IssueID: row.IssueID, ProjectID: row.ProjectID, ProjectTitle: row.ProjectTitle}
+		if err := report(ctx, cfg, task, row.Provider, row.SessionID, row.WorkDir, logger); err != nil {
+			counts.Failed++
+			continue
+		}
+		counts.Reported++
+	}
+	return counts
+}
+
+// ReportTianYuanOrigin is deliberately daemon-owned: providers expose only a
 // native session id and never learn TianYuan's address or credential.
-func reportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, sessionID, observedCwd string, logger *slog.Logger) error {
+func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, sessionID, observedCwd string, logger *slog.Logger) error {
 	if cfg.TianYuanOriginReportURL == "" || sessionID == "" || provider == "" {
 		return nil
 	}

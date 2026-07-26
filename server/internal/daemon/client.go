@@ -710,6 +710,18 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
+// ListTianYuanSessionOrigins fetches exact, persisted identity metadata for
+// the explicit operator replay command. It never returns task content.
+func (c *Client) ListTianYuanSessionOrigins(ctx context.Context) ([]SessionOrigin, error) {
+	var resp struct {
+		Origins []SessionOrigin `json:"origins"`
+	}
+	if err := c.getJSON(ctx, "/api/daemon/tasks/tianyuan-session-origins", &resp); err != nil {
+		return nil, err
+	}
+	return resp.Origins, nil
+}
+
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.
