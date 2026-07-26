@@ -70,6 +70,51 @@ func TestReportTianYuanOriginTransportFailureDoesNotExposeEndpoint(t *testing.T)
 	}
 }
 
+func TestReportTianYuanDiagnosticUsesStrictSessionEvidence(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-tianyuan-path-key") != "path-key" {
+			t.Fatal("missing path key")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	err := ReportTianYuanDiagnostic(
+		context.Background(),
+		Config{TianYuanOriginReportURL: srv.URL, TianYuanOriginReportPathKey: "path-key"},
+		"grok",
+		"ses-native",
+		"/tmp/provider-created-cwd",
+		"diagnostic.model_discovery",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"schemaVersion":   float64(1),
+		"deviceId":        "ty-mac-main",
+		"provider":        "grok",
+		"nativeSessionId": "ses-native",
+		"observedCwd":     "/tmp/provider-created-cwd",
+		"origin":          "diagnostic",
+		"lineageKind":     "diagnostic",
+		"lineageEvidence": "provider_native",
+		"originKind":      "diagnostic.model_discovery",
+		"originId":        "ses-native",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("%s = %#v, want %#v; payload=%#v", key, got[key], value, got)
+		}
+	}
+	if _, present := got["canonicalProjectRoot"]; present {
+		t.Fatalf("diagnostic payload must not infer a project root: %#v", got)
+	}
+}
+
 func TestReplayTianYuanSessionOriginsUsesOnlyExactRowsAndContinues(t *testing.T) {
 	var calls []string
 	report := func(_ context.Context, _ Config, _ Task, provider, sessionID, _ string, _ *slog.Logger) error {

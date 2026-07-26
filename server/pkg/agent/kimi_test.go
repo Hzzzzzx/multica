@@ -16,6 +16,37 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
+func TestDiscoverKimiModelsReportsProviderNativeSession(t *testing.T) {
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"kimi_discovery_native","models":{"availableModels":[{"modelId":"kimi-model","name":"Kimi Model"}],"currentModelId":"kimi-model"}}}\n' "$id"
+      ;;
+  esac
+done
+`))
+	var observedProvider, observedSessionID, observedCwd string
+	ctx := WithNativeSessionObserver(context.Background(), func(provider, sessionID, cwd string) {
+		observedProvider, observedSessionID, observedCwd = provider, sessionID, cwd
+	})
+	models, err := discoverKimiModels(ctx, Command{Path: fakePath})
+	if err != nil {
+		t.Fatalf("discover kimi models: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "kimi-model" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+	if observedProvider != "kimi" || observedSessionID != "kimi_discovery_native" || observedCwd == "" {
+		t.Fatalf("unexpected native session observation: provider=%q session=%q cwd=%q", observedProvider, observedSessionID, observedCwd)
+	}
+}
+
 func TestKimiToolNameFromTitle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

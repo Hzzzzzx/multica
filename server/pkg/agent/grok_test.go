@@ -1075,9 +1075,16 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	t.Setenv("GROK_AUTH_METHODS", "api")
 	t.Setenv("XAI_API_KEY", "test-only-key")
 
-	catalog, err := discoverGrokModels(context.Background(), Command{Path: fakePath})
+	var observedProvider, observedSessionID, observedCwd string
+	ctx := WithNativeSessionObserver(context.Background(), func(provider, sessionID, cwd string) {
+		observedProvider, observedSessionID, observedCwd = provider, sessionID, cwd
+	})
+	catalog, err := discoverGrokModels(ctx, Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discover grok models: %v", err)
+	}
+	if observedProvider != "grok" || observedSessionID == "" || observedCwd == "" {
+		t.Fatalf("unexpected native session observation: provider=%q session=%q cwd=%q", observedProvider, observedSessionID, observedCwd)
 	}
 	if len(catalog.Models) != 3 || catalog.Models[0].ID != "grok-4.6" {
 		t.Fatalf("unexpected models: %+v", catalog.Models)
@@ -1111,6 +1118,9 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	}
 	if !strings.Contains(requests, `"methodId":"xai.api_key"`) {
 		t.Fatalf("expected API-key auth selected from initialize response:\n%s", raw)
+	}
+	if observedProvider != "grok" || observedSessionID != "ses_new" || observedCwd == "" {
+		t.Fatalf("unexpected native session observation: provider=%q session=%q cwd=%q", observedProvider, observedSessionID, observedCwd)
 	}
 }
 

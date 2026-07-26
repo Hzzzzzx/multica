@@ -4710,8 +4710,8 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 
 	discoveryCtx := ctx
 	if rt.Provider == "kimi" || rt.Provider == "grok" {
-		discoveryCtx = agent.WithNativeSessionObserver(ctx, func(provider, sessionID string) {
-			if err := ReportTianYuanDiagnostic(context.Background(), d.cfg, provider, sessionID, "diagnostic.model_discovery"); err != nil {
+		discoveryCtx = agent.WithNativeSessionObserver(ctx, func(provider, sessionID, observedCwd string) {
+			if err := ReportTianYuanDiagnostic(context.Background(), d.cfg, provider, sessionID, observedCwd, "diagnostic.model_discovery"); err != nil {
 				d.logger.Warn("TianYuan diagnostic reporting degraded", "stage", "model_discovery")
 			}
 		})

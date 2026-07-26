@@ -1694,6 +1694,7 @@ func annotateHermesDiscoveryUnconfigured(err error) error {
 func discoverKimiModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
 	var acpVersion string
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		provider:     "kimi",
 		defaultBin:   "kimi",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kimi-discovery-",
@@ -2160,7 +2161,7 @@ type nativeSessionObserverKey struct{}
 
 // WithNativeSessionObserver records only a provider-confirmed native session
 // boundary. Discovery never passes prompt, output, or tool data to it.
-func WithNativeSessionObserver(ctx context.Context, observe func(provider, sessionID string)) context.Context {
+func WithNativeSessionObserver(ctx context.Context, observe func(provider, sessionID, observedCwd string)) context.Context {
 	return context.WithValue(ctx, nativeSessionObserverKey{}, observe)
 }
 
@@ -2341,9 +2342,9 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	if err != nil {
 		return fail("session/new", err)
 	}
-	if observe, _ := ctx.Value(nativeSessionObserverKey{}).(func(string, string)); observe != nil {
+	if observe, _ := ctx.Value(nativeSessionObserverKey{}).(func(string, string, string)); observe != nil {
 		if sessionID := extractACPSessionID(sessionResult); sessionID != "" && p.provider != "" {
-			observe(p.provider, sessionID)
+			observe(p.provider, sessionID, tmp)
 		}
 	}
 	models := parseACPSessionNewModels(sessionResult)
@@ -2654,6 +2655,7 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 	// background update check can't stall discovery. Auth is selected only
 	// after initialize returns the methods this installed CLI actually offers.
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		provider:     "grok",
 		defaultBin:   "grok",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-grok-discovery-",
