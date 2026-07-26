@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -85,18 +84,16 @@ func (h *Handler) ListTianYuanSessionOrigins(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	type origin struct {
-		TaskID       string `json:"task_id"`
-		IssueID      string `json:"issue_id,omitempty"`
-		Provider     string `json:"provider"`
-		SessionID    string `json:"session_id"`
-		WorkDir      string `json:"work_dir,omitempty"`
-		CapturedAt   string `json:"captured_at,omitempty"`
-		ProjectID    string `json:"project_id,omitempty"`
-		ProjectTitle string `json:"project_title,omitempty"`
+		TaskID          string `json:"task_id"`
+		IssueID         string `json:"issue_id,omitempty"`
+		Provider        string `json:"provider"`
+		SessionID       string `json:"session_id"`
+		WorkDir         string `json:"work_dir,omitempty"`
+		ProjectIdentity string `json:"project_identity,omitempty"`
 	}
 	out := make([]origin, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, origin{TaskID: uuidToString(row.TaskID), IssueID: uuidToString(row.IssueID), Provider: row.Provider, SessionID: row.SessionID.String, WorkDir: row.WorkDir.String, CapturedAt: row.CapturedAt.Time.Format(time.RFC3339Nano), ProjectID: uuidToString(row.ProjectID), ProjectTitle: row.ProjectTitle.String})
+		out = append(out, origin{TaskID: uuidToString(row.TaskID), IssueID: uuidToString(row.IssueID), Provider: row.Provider, SessionID: row.SessionID.String, WorkDir: row.WorkDir.String, ProjectIdentity: uuidToString(row.ProjectIdentity)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"origins": out})
 }

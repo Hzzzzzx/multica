@@ -325,13 +325,10 @@ SELECT
     ar.provider,
     atq.session_id,
     atq.work_dir,
-    atq.created_at AS captured_at,
-    i.project_id,
-    p.title AS project_title
+    i.project_id AS project_identity
 FROM agent_task_queue atq
 JOIN agent_runtime ar ON ar.id = atq.runtime_id
 LEFT JOIN issue i ON i.id = atq.issue_id
-LEFT JOIN project p ON p.id = i.project_id
 WHERE ar.daemon_id = $1
   AND atq.session_id IS NOT NULL
   AND atq.session_id <> ''

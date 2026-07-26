@@ -9775,7 +9775,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							} else {
 								if err := d.reportPinnedTianYuanOrigin(pinCtx, taskID, sid, wd, taskLog); err != nil {
 									// This optional local integration must never change task state.
-									taskLog.Warn("TianYuan origin reporting degraded", "error", err)
+									taskLog.Warn("TianYuan origin reporting degraded", "stage", "report")
 								}
 							}
 						}()

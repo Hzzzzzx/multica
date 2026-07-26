@@ -6452,13 +6452,10 @@ SELECT
     ar.provider,
     atq.session_id,
     atq.work_dir,
-    atq.created_at AS captured_at,
-    i.project_id,
-    p.title AS project_title
+    i.project_id AS project_identity
 FROM agent_task_queue atq
 JOIN agent_runtime ar ON ar.id = atq.runtime_id
 LEFT JOIN issue i ON i.id = atq.issue_id
-LEFT JOIN project p ON p.id = i.project_id
 WHERE ar.daemon_id = $1
   AND atq.session_id IS NOT NULL
   AND atq.session_id <> ''
@@ -6466,14 +6463,12 @@ ORDER BY atq.created_at ASC
 `
 
 type ListTianYuanSessionOriginsForDaemonRow struct {
-	TaskID       pgtype.UUID        `json:"task_id"`
-	IssueID      pgtype.UUID        `json:"issue_id"`
-	Provider     string             `json:"provider"`
-	SessionID    pgtype.Text        `json:"session_id"`
-	WorkDir      pgtype.Text        `json:"work_dir"`
-	CapturedAt   pgtype.Timestamptz `json:"captured_at"`
-	ProjectID    pgtype.UUID        `json:"project_id"`
-	ProjectTitle pgtype.Text        `json:"project_title"`
+	TaskID          pgtype.UUID `json:"task_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	Provider        string      `json:"provider"`
+	SessionID       pgtype.Text `json:"session_id"`
+	WorkDir         pgtype.Text `json:"work_dir"`
+	ProjectIdentity pgtype.UUID `json:"project_identity"`
 }
 
 // Deliberately excludes task context, prompt, result, and error content.
@@ -6493,9 +6488,7 @@ func (q *Queries) ListTianYuanSessionOriginsForDaemon(ctx context.Context, daemo
 			&i.Provider,
 			&i.SessionID,
 			&i.WorkDir,
-			&i.CapturedAt,
-			&i.ProjectID,
-			&i.ProjectTitle,
+			&i.ProjectIdentity,
 		); err != nil {
 			return nil, err
 		}

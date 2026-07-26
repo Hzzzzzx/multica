@@ -188,6 +188,17 @@ type Task struct {
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
+// SessionOrigin is the content-free identity record used by the explicit
+// TianYuan replay command.
+type SessionOrigin struct {
+	TaskID          string `json:"task_id"`
+	IssueID         string `json:"issue_id,omitempty"`
+	Provider        string `json:"provider"`
+	SessionID       string `json:"session_id"`
+	WorkDir         string `json:"work_dir,omitempty"`
+	ProjectIdentity string `json:"project_identity,omitempty"`
+}
+
 // ChatAttachmentMeta is the structured attachment metadata the daemon
 // hands to the agent for chat tasks. We pass id + filename + content_type
 // so the chat prompt can list them explicitly and instruct the agent to

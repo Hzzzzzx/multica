@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+var ErrTianYuanOriginUnavailable = errors.New("TianYuan origin reporter unavailable")
 
 type TianYuanReplayCounts struct{ Scanned, Reported, Skipped, Failed int }
 
@@ -27,7 +29,7 @@ func ReplayTianYuanSessionOrigins(ctx context.Context, cfg Config, rows []Sessio
 			counts.Skipped++
 			continue
 		}
-		task := Task{ID: row.TaskID, IssueID: row.IssueID, ProjectID: row.ProjectID, ProjectTitle: row.ProjectTitle}
+		task := Task{ID: row.TaskID, IssueID: row.IssueID, ProjectID: row.ProjectIdentity}
 		if err := report(ctx, cfg, task, row.Provider, row.SessionID, row.WorkDir, logger); err != nil {
 			counts.Failed++
 			continue
@@ -60,8 +62,8 @@ func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, 
 		"originKind":      origin,
 		"originId":        reference,
 	}
-	if task.ProjectTitle != "" {
-		payload["projectTitle"] = task.ProjectTitle
+	if task.ProjectID != "" {
+		payload["projectIdentity"] = task.ProjectID
 	}
 	if observedCwd != "" {
 		if root, err := filepath.EvalSymlinks(observedCwd); err == nil {
@@ -70,11 +72,11 @@ func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, 
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("encode TianYuan origin payload: %w", err)
+		return ErrTianYuanOriginUnavailable
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TianYuanOriginReportURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create TianYuan origin request: %w", err)
+		return ErrTianYuanOriginUnavailable
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if key := strings.TrimSpace(cfg.TianYuanOriginReportPathKey); key != "" {
@@ -82,11 +84,11 @@ func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, 
 	}
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
-		return fmt.Errorf("post TianYuan origin: %w", err)
+		return ErrTianYuanOriginUnavailable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("TianYuan origin returned %d", resp.StatusCode)
+		return ErrTianYuanOriginUnavailable
 	}
 	return nil
 }

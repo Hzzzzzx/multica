@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,6 +53,17 @@ func TestReportTianYuanOriginFailureIsReturnedForCallerToDegrade(t *testing.T) {
 	defer srv.Close()
 	if err := ReportTianYuanOrigin(context.Background(), Config{TianYuanOriginReportURL: srv.URL}, Task{ID: "task-1"}, "opencode", "ses-1", "/tmp", nil); err == nil {
 		t.Fatal("expected reporter failure")
+	}
+}
+
+func TestReportTianYuanOriginTransportFailureDoesNotExposeEndpoint(t *testing.T) {
+	const endpoint = "http://127.0.0.1:1/private-origin"
+	err := ReportTianYuanOrigin(context.Background(), Config{TianYuanOriginReportURL: endpoint, TianYuanOriginReportPathKey: "private-key"}, Task{ID: "task-1"}, "opencode", "ses-1", "/tmp", nil)
+	if !errors.Is(err, ErrTianYuanOriginUnavailable) {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Contains(err.Error(), endpoint) || strings.Contains(err.Error(), "private-key") {
+		t.Fatalf("leaked endpoint in %q", err)
 	}
 }
 
