@@ -4711,9 +4711,12 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	discoveryCtx := ctx
 	if rt.Provider == "kimi" || rt.Provider == "grok" {
 		discoveryCtx = agent.WithNativeSessionObserver(ctx, func(provider, sessionID, observedCwd string) {
-			if err := ReportTianYuanDiagnostic(context.Background(), d.cfg, provider, sessionID, observedCwd, "diagnostic.model_discovery"); err != nil {
-				d.logger.Warn("TianYuan diagnostic reporting degraded", "stage", "model_discovery")
-			}
+			// Origin telemetry must never extend the user-visible model-list latency.
+			go func() {
+				if err := ReportTianYuanDiagnostic(context.Background(), d.cfg, provider, sessionID, observedCwd, "diagnostic.model_discovery"); err != nil {
+					d.logger.Warn("TianYuan diagnostic reporting degraded", "stage", "model_discovery")
+				}
+			}()
 		})
 	}
 	catalog, err := listModels(discoveryCtx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
