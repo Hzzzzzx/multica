@@ -684,6 +684,7 @@ func codexStaticModels() []Model {
 // non-empty; on any failure the caller falls back to the manual-entry field.
 func discoverTraecliModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
 	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		provider:     "traecli",
 		defaultBin:   "traecli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-traecli-discovery-",
@@ -2055,6 +2056,7 @@ func discoverZcodeModels(ctx context.Context) ([]Model, error) {
 // session/new response itself.
 func discoverCopilotModels(ctx context.Context, runtimeCmd Command) (Catalog, error) {
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		provider:     "copilot",
 		defaultBin:   "copilot",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-copilot-discovery-",
@@ -2109,6 +2111,7 @@ const hermesDiscoveryTimeout = 40 * time.Second
 // `--acp`), and what to label temporary work directories so they're
 // easy to identify in logs.
 type acpDiscoveryProvider struct {
+	provider         string
 	defaultBin       string
 	clientName       string
 	extraEnv         []string
@@ -2151,6 +2154,14 @@ type acpDiscoveryProvider struct {
 	// binary what it is. It cannot fail discovery: a provider that learns
 	// nothing useful here must degrade, not abort.
 	inspectInit func(json.RawMessage)
+}
+
+type nativeSessionObserverKey struct{}
+
+// WithNativeSessionObserver records only a provider-confirmed native session
+// boundary. Discovery never passes prompt, output, or tool data to it.
+func WithNativeSessionObserver(ctx context.Context, observe func(provider, sessionID string)) context.Context {
+	return context.WithValue(ctx, nativeSessionObserverKey{}, observe)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -2329,6 +2340,11 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	})
 	if err != nil {
 		return fail("session/new", err)
+	}
+	if observe, _ := ctx.Value(nativeSessionObserverKey{}).(func(string, string)); observe != nil {
+		if sessionID := extractACPSessionID(sessionResult); sessionID != "" && p.provider != "" {
+			observe(p.provider, sessionID)
+		}
 	}
 	models := parseACPSessionNewModels(sessionResult)
 	if len(models) == 0 {

@@ -86,3 +86,28 @@ func ReportTianYuanOrigin(ctx context.Context, cfg Config, task Task, provider, 
 	}
 	return nil
 }
+
+// ReportTianYuanDiagnostic records a provider-native discovery boundary only.
+func ReportTianYuanDiagnostic(ctx context.Context, cfg Config, provider, sessionID, evidence string) error {
+	if cfg.TianYuanOriginReportURL == "" || provider == "" || sessionID == "" {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{"schemaVersion": 1, "deviceId": "ty-mac-main", "provider": provider, "nativeSessionId": sessionID, "origin": "diagnostic", "lineageKind": "diagnostic", "lineageEvidence": "provider_native", "originKind": evidence, "originId": sessionID})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TianYuanOriginReportURL, bytes.NewReader(payload))
+	if err != nil {
+		return ErrTianYuanOriginUnavailable
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key := strings.TrimSpace(cfg.TianYuanOriginReportPathKey); key != "" {
+		req.Header.Set("x-tianyuan-path-key", key)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return ErrTianYuanOriginUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ErrTianYuanOriginUnavailable
+	}
+	return nil
+}
