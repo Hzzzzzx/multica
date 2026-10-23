@@ -24,6 +24,15 @@
 | `apps/desktop/src/renderer/src/platform/local-dev-auto-login.ts` | Desktop 本机自动 dev-login |
 | `apps/desktop/src/renderer/src/App.tsx` | 启动时对本机 API 调用 auto-login |
 
+## 其他下游定制（同分支，同禁推 upstream）
+
+| 能力 | 涉及文件 | 说明 |
+|------|----------|------|
+| Chrys 运行时 | `server/pkg/agent/chrys.go`、`agents_probe.go`、logo | ACP 后端 + 探测 |
+| WorkBuddy 运行时 | `server/pkg/agent/workbuddy.go`、`builtin_runtimes.go`、`codebuddy.go` | BuiltinRuntime（family=codebuddy）；WorkBuddy.app 内置引擎经 Electron-as-Node 启动（GUI daemon 无 shell node）；skills 三级目录 |
+| TianYuan 会话溯源 | `server/internal/daemon/tianyuan_origin_reporter.go` 等 7 提交 | `TIANYUAN_ORIGIN_REPORT_URL`/`TIANYUAN_ORIGIN_REPORT_PATH_KEY` 开关（默认关闭） |
+| 通知 includeActor | `server/cmd/server/notification_listeners.go` | 状态变化通知发起者 |
+
 ## 允许
 
 - 提交到本机 fork / 下游分支（如 `agent/opencode-tianyuan-contract`、`origin` 上的 TianYuan 分支）
