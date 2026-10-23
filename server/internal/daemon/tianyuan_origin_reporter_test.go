@@ -160,7 +160,7 @@ func TestExecuteAndDrainPinsBeforeReportingAndDegradesReporterFailure(t *testing
 	}}
 	d.sessionOrigins.Store("task-1", taskOrigin{task: Task{ID: "task-1", IssueID: "issue-1"}, provider: "codex"})
 	var seq atomic.Int32
-	if _, _, err := d.executeAndDrain(context.Background(), statusBackend{sessionID: "exact"}, "", agent.ExecOptions{Cwd: "/tmp"}, slog.Default(), "task-1", &seq); err != nil {
+	if _, _, err := d.executeAndDrain(context.Background(), statusBackend{sessionID: "exact"}, "", agent.ExecOptions{Cwd: "/tmp"}, slog.Default(), "task-1", "", &seq); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(time.Second)
