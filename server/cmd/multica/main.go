@@ -2,18 +2,23 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
+	// Separate full revision metadata from the existing display commit.
+	buildCommit = "unknown"
 )
 
 // debugFlag is bound to the persistent --debug flag and, when set, makes
@@ -95,6 +100,18 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == execenv.PreparationHelperArg {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		if err := execenv.RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == agent.CursorHookHelperArg {
+		agent.RunCursorHookRelay(os.Stdin, os.Stdout, os.Getenv)
+		return
+	}
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {

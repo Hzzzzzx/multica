@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -14,19 +15,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { useQuery } from "@tanstack/react-query";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { commonIssueFields } from "@multica/core/issues/batch";
+import { sharedWorkflowStatusKeys, useIssueWorkflows } from "@multica/core/issue-workflows";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 
 export function BatchActionToolbar({
   issues,
   placement = "fixed-bottom",
+  clearSelectionOnApply = false,
 }: {
   /**
    * The universe of selectable issues at this call site (the same list the
@@ -42,19 +52,53 @@ export function BatchActionToolbar({
    * the selected rows (used inside scrollable sections like sub-issues).
    */
   placement?: "fixed-bottom" | "inline";
+  /**
+   * Drop the selection once a status / priority / assignee change fully
+   * applies. Off for full-screen lists, where the selection stays so several
+   * edits can be chained; on for sub-issues, where a batch edit is a one-shot
+   * dispatch and a lingering inline toolbar reads as unfinished. A partial or
+   * failed write keeps the selection so the user can retry.
+   */
+  clearSelectionOnApply?: boolean;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
   const selectedIds = selection.selectedIds;
   const clear = selection.clear;
-  const count = selectedIds.size;
+  const shouldReduceMotion = useReducedMotion() ?? false;
+
+  // The authoritative selection is selectedIds ∩ the visible universe. Acting
+  // on raw selectedIds while other consumers (Export selected, common fields)
+  // intersect lets one "N selected" mean different sets — e.g. a realtime
+  // update drops a selected row from the window, batch still mutates it but
+  // export omits it. Count, pickers, and every action below share this set.
+  const selectedIssues = useMemo(
+    () => issues.filter((i) => selectedIds.has(i.id)),
+    [issues, selectedIds],
+  );
+  const count = selectedIssues.length;
 
   // Reflect the real shared value of the selected issues in each picker; fall
   // back to an empty (no-checkmark) state when the selection is mixed, instead
   // of asserting a hardcoded default.
   const common = useMemo(
-    () => commonIssueFields(issues.filter((i) => selectedIds.has(i.id))),
-    [issues, selectedIds],
+    () => commonIssueFields(selectedIssues),
+    [selectedIssues],
+  );
+
+  // A selection inside one project offers that project's workflow statuses;
+  // one spanning projects offers the statuses every selected issue's
+  // workflow allows. (MUL-7420)
+  const sharedProjectId = useMemo(() => {
+    const first = selectedIssues[0]?.project_id ?? null;
+    return first && selectedIssues.every((i) => i.project_id === first) ? first : null;
+  }, [selectedIssues]);
+  const wsId = useWorkspaceId();
+  const { workflows } = useIssueWorkflows(wsId);
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: count > 0 && !sharedProjectId });
+  const allowedStatuses = useMemo(
+    () => (sharedProjectId ? null : sharedWorkflowStatusKeys(workflows, projects, selectedIssues)),
+    [sharedProjectId, workflows, projects, selectedIssues],
   );
 
   const [statusOpen, setStatusOpen] = useState(false);
@@ -67,19 +111,27 @@ export function BatchActionToolbar({
   const openModal = useModalStore((s) => s.open);
   const loading =
     surfaceActions?.isPending ?? (batchUpdate.isPending || batchDelete.isPending);
+  const ids = selectedIssues.map((issue) => issue.id);
 
-  if (count === 0) return null;
-
-  const ids = Array.from(selectedIds);
+  useEffect(() => {
+    if (count > 0) return;
+    setStatusOpen(false);
+    setPriorityOpen(false);
+    setAssigneeOpen(false);
+    setDeleteOpen(false);
+  }, [count]);
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
-      if (surfaceActions) {
-        await surfaceActions.batchUpdate(ids, updates);
+      const { updated } = surfaceActions
+        ? await surfaceActions.batchUpdate(ids, updates)
+        : await batchUpdate.mutateAsync({ ids, updates });
+      if (updated < count) {
+        toast.warning(t(($) => $.batch.update_partial, { updated, count }));
       } else {
-        await batchUpdate.mutateAsync({ ids, updates });
+        if (clearSelectionOnApply) clear();
+        toast.success(t(($) => $.batch.update_success, { count }));
       }
-      toast.success(t(($) => $.batch.update_success, { count }));
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -109,16 +161,16 @@ export function BatchActionToolbar({
       // issue is in backlog the confirm modal would only render an empty "won't
       // start" box — apply directly, matching handleBatchStatus's backlog short-
       // circuit. A mixed selection still routes through the modal: the non-backlog
-      // issues will trigger and need confirmation. An empty intersection (selected
-      // ids not in `issues`) falls through to the modal — safer than skipping.
-      const selected = issues.filter((i) => selectedIds.has(i.id));
-      const allBacklog = selected.length > 0 && selected.every((i) => i.status === "backlog");
+      // issues will trigger and need confirmation.
+      // Only the fixed Backlog key parks work; custom Unstarted does not.
+      const allBacklog = selectedIssues.every((i) => i.status === "backlog");
       if (!allBacklog) {
         openModal("issue-run-confirm", {
           issueIds: ids,
           mode: "assign",
           assigneeType: updates.assignee_type,
           assigneeId: updates.assignee_id,
+          onApplied: clearSelectionOnApply ? clear : undefined,
         });
         return;
       }
@@ -148,20 +200,52 @@ export function BatchActionToolbar({
 
   return (
     <>
-      <div
-        className={cn(
-          "z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg",
-          placement === "fixed-bottom"
-            ? "fixed bottom-6 left-1/2 -translate-x-1/2"
-            : "mb-2 w-fit",
-        )}
-      >
+      <AnimatePresence initial={false}>
+        {count > 0 && (
+          <div
+            key="issue-batch-toolbar"
+            className={cn(
+              "z-50",
+              placement === "fixed-bottom"
+                ? "fixed bottom-6 left-1/2 -translate-x-1/2 max-md:above-chat-launcher"
+                : "mb-2 w-fit",
+            )}
+          >
+            <motion.div
+              className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
+              initial={{
+                opacity: 0,
+                transform: shouldReduceMotion
+                  ? "translateY(0)"
+                  : "translateY(8px)",
+              }}
+              animate={{
+                opacity: 1,
+                transform: "translateY(0)",
+                transition: {
+                  duration: UI_MOTION_DURATION.fast,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                transform: shouldReduceMotion
+                  ? "translateY(0)"
+                  : "translateY(8px)",
+                transition: {
+                  duration: shouldReduceMotion
+                    ? UI_MOTION_DURATION.fast
+                    : UI_MOTION_DURATION.micro,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+            >
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
-          <span className="text-sm font-medium">{t(($) => $.batch.selected, { count })}</span>
+          <span className="text-body font-medium">{t(($) => $.batch.selected, { count })}</span>
           <button
             type="button"
             onClick={clear}
-            className="rounded p-0.5 hover:bg-accent transition-colors"
+            className="rounded-xs p-0.5 hover:bg-accent transition-colors"
           >
             <X className="size-3.5 text-muted-foreground" />
           </button>
@@ -170,6 +254,10 @@ export function BatchActionToolbar({
         {/* Status */}
         <StatusPicker
           status={common.status}
+          // No shared project spans projects (or none): not the Default-only
+          // list of a single issue outside a project. (MUL-8121)
+          projectId={sharedProjectId ?? undefined}
+          allowedStatuses={allowedStatuses}
           onUpdate={handleBatchStatus}
           open={statusOpen}
           onOpenChange={setStatusOpen}
@@ -213,9 +301,12 @@ export function BatchActionToolbar({
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.batch.delete)}
         </Button>
-      </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      {count > 0 && <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -223,7 +314,7 @@ export function BatchActionToolbar({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(($) => $.batch.delete_dialog_desc, { count })}
-              <span className="mt-2 block text-xs text-muted-foreground/80">
+              <span className="mt-2 block text-caption text-muted-foreground">
                 {t(($) => $.batch.delete_dialog_warning)}
               </span>
             </AlertDialogDescription>
@@ -238,7 +329,7 @@ export function BatchActionToolbar({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </>
   );
 }

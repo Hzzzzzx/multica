@@ -1,158 +1,66 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getApi } from "../api";
+import { ApiError } from "../api/client";
 import { useAuthStore } from "../auth";
 import {
   captureSignupSource,
   identify as identifyAnalytics,
   initAnalytics,
-  resetAnalytics,
 } from "../analytics";
 import { configStore } from "../config";
-import { workspaceKeys } from "../workspace/queries";
+import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { createLogger } from "../logger";
-import { defaultStorage } from "./storage";
 import { setCurrentWorkspace } from "./workspace-storage";
+import { clearClientSessionData } from "./session-cleanup";
+import { defaultStorage } from "./storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
 const logger = createLogger("auth");
+const RECOVERY_RETRY_DELAYS_MS = [
+  1_000,
+  2_000,
+  4_000,
+  8_000,
+  16_000,
+  30_000,
+] as const;
 
 export function AuthInitializer({
   children,
   onLogin,
-  onLogout,
   storage = defaultStorage,
   cookieAuth,
   identity,
 }: {
   children: ReactNode;
   onLogin?: () => void;
-  onLogout?: () => void;
+  // No `onLogout`: every unauthenticated exit below delegates to the auth
+  // store's own teardown, which is where the logout / session-expiry
+  // callbacks live.
   storage?: StorageAdapter;
   cookieAuth?: boolean;
   identity?: ClientIdentity;
 }) {
   const qc = useQueryClient();
+  const retryGeneration = useAuthStore((state) => state.retryGeneration);
+  const configLoadedRef = useRef(false);
+  const configRequestRef = useRef<Promise<boolean> | null>(null);
+  const authRecoveryPendingRef = useRef(false);
+  const retryConfigRef = useRef<() => void>(() => {});
 
-  useEffect(() => {
-    const api = getApi();
+  const loadConfig = useCallback((): Promise<boolean> => {
+    if (configLoadedRef.current) return Promise.resolve(true);
+    if (configRequestRef.current) return configRequestRef.current;
 
-    // Stamp attribution before anything else — the signup event (server-side)
-    // reads this cookie, so it has to be present before the user hits submit.
-    captureSignupSource();
-
-    const isTianYuanWebView =
-      typeof navigator !== "undefined" &&
-      /TianYuanAndroidMultica/.test(navigator.userAgent);
-
-    const seed = (
-      user: User,
-      wsList: Awaited<ReturnType<typeof api.listWorkspaces>>,
-      token?: string,
-    ) => {
-      if (token) {
-        api.setToken(token);
-        storage.setItem("multica_token", token);
-      }
-      try {
-        onLogin?.();
-      } catch {
-        /* ignore */
-      }
-      useAuthStore.setState({ user, isLoading: false });
-      try {
-        identifyAnalytics(user.id, { email: user.email, name: user.name });
-      } catch {
-        /* ignore */
-      }
-      qc.setQueryData(workspaceKeys.list(), wsList);
-      // 固定本地主 workspace，避免 !workspace 卡 MulticaIcon
-      const preferred =
-        wsList.find((w) => w.slug === "workspace") ?? wsList[0] ?? null;
-      if (preferred) {
-        setCurrentWorkspace(preferred.slug, preferred.id);
-      }
-      console.log(
-        "[ty-auth] store seeded " +
-          String(user?.email) +
-          " n=" +
-          String(wsList?.length) +
-          " ws=" +
-          String(preferred?.slug),
-      );
-    };
-
-    // 供 Android WebView 在 fetch 完 token 后直接灌会话（不依赖 useEffect 时序）
-    if (typeof window !== "undefined") {
-      (
-        window as unknown as {
-          __tianyuanSeedSession?: (p: {
-            token: string;
-            user: User;
-            workspaces: Awaited<ReturnType<typeof api.listWorkspaces>>;
-          }) => void;
-        }
-      ).__tianyuanSeedSession = (p) => {
-        seed(p.user, p.workspaces, p.token);
-      };
-    }
-
-    // TianYuan 嵌入：强制 dev@multica.local 会话，只维护 Multica 网页看板
-    if (isTianYuanWebView) {
-      useAuthStore.setState({ isLoading: true });
-      console.log("[ty-auth] webview dev auto-login start");
-      const existing = storage.getItem("multica_token");
-      const boot = existing
-        ? Promise.resolve(existing).then((token) => {
-            api.setToken(token);
-            return Promise.all([api.getMe(), api.listWorkspaces()]).then(
-              ([user, wsList]) => ({ user, wsList, token }),
-            );
-          })
-        : api.devLogin().then((res) => {
-            api.setToken(res.token);
-            storage.setItem("multica_token", res.token);
-            return Promise.all([api.getMe(), api.listWorkspaces()]).then(
-              ([user, wsList]) => ({ user, wsList, token: res.token }),
-            );
-          });
-      boot
-        .then(({ user, wsList, token }) => seed(user, wsList, token))
-        .catch((err) => {
-          console.log("[ty-auth] failed, try devLogin again " + String(err));
-          api
-            .devLogin()
-            .then((res) => {
-              api.setToken(res.token);
-              storage.setItem("multica_token", res.token);
-              return Promise.all([api.getMe(), api.listWorkspaces()]).then(
-                ([user, wsList]) => ({ user, wsList, token: res.token }),
-              );
-            })
-            .then(({ user, wsList, token }) => seed(user, wsList, token))
-            .catch((err2) => {
-              logger.error("tianyuan webview dev auto-login failed", err2);
-              try {
-                onLogout?.();
-              } catch {
-                /* ignore */
-              }
-              resetAnalytics();
-              useAuthStore.setState({ user: null, isLoading: false });
-            });
-        });
-      api.getConfig().catch(() => {});
-      return;
-    }
-
-    // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
-    api
+    const request = getApi()
       .getConfig()
       .then((cfg) => {
+        configStore.getState().setAttachmentPublicUrl(cfg.attachment_public_url);
         if (cfg.cdn_domain) {
           configStore.getState().setCdnConfig({
             cdnDomain: cfg.cdn_domain,
@@ -166,6 +74,8 @@ export function AuthInitializer({
           // Old servers omit this field — treat that as "creation allowed"
           // (the managed-cloud default) rather than blocking the UI.
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
+          // Absent/false on the managed cloud and older servers → section hidden.
+          vcsIntegrationAvailable: cfg.vcs_integration_available === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,
@@ -173,6 +83,31 @@ export function AuthInitializer({
         });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         configStore.getState().setServerVersion(cfg.server_version);
+        // Absent on every server that predates the worktree save gate, which
+        // is exactly when the client must not offer the mode (#7113).
+        configStore
+          .getState()
+          .setLocalWorktreeSupported(cfg.local_worktree_supported === true);
+        // Older agent handlers returned success while silently dropping this
+        // additive field, so writes stay disabled unless the server declares
+        // the persistence contract explicitly.
+        configStore
+          .getState()
+          .setAgentConversationStartersSupported(
+            cfg.agent_conversation_starters_supported === true,
+          );
+        configStore
+          .getState()
+          .setIssueCreatePropertiesSupported(
+            cfg.issue_create_properties_supported === true,
+          );
+        // Older servers delete a comment's replies with it; promise nothing
+        // about replies unless the server declares otherwise.
+        configStore
+          .getState()
+          .setCommentDeleteKeepRepliesSupported(
+            cfg.comment_delete_keep_replies_supported === true,
+          );
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
@@ -181,111 +116,359 @@ export function AuthInitializer({
             environment: cfg.analytics_environment,
           });
         }
+        configLoadedRef.current = true;
+        return true;
       })
-      .catch(() => {
-        /* config is optional — legacy file card matching degrades gracefully */
+      .catch(() => false)
+      .finally(() => {
+        configRequestRef.current = null;
       });
+    configRequestRef.current = request;
+    return request;
+  }, [identity?.version]);
+
+  useEffect(() => {
+    // Stamp attribution before anything else — the signup event (server-side)
+    // reads this cookie, so it has to be present before the user hits submit.
+    captureSignupSource();
+
+    // Configuration is optional for startup, but an offline boot must still
+    // self-heal once connectivity returns. Keep retries rate-limited at the
+    // same 30-second ceiling as auth and accelerate them on `online`.
+    let cancelled = false;
+    let inFlight = false;
+    let retryAfterFlight = false;
+    let retryIndex = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const attempt = async () => {
+      if (cancelled || configLoadedRef.current) return;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      if (inFlight) {
+        retryAfterFlight = true;
+        return;
+      }
+
+      inFlight = true;
+      const loaded = await loadConfig();
+      inFlight = false;
+      if (cancelled) return;
+      if (loaded) {
+        window.removeEventListener("online", retryNow);
+        return;
+      }
+      if (retryAfterFlight) {
+        retryAfterFlight = false;
+        void attempt();
+        return;
+      }
+
+      const delay = RECOVERY_RETRY_DELAYS_MS[retryIndex];
+      retryIndex = Math.min(
+        retryIndex + 1,
+        RECOVERY_RETRY_DELAYS_MS.length - 1,
+      );
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        void attempt();
+      }, delay);
+    };
+
+    const retryNow = () => {
+      if (cancelled || configLoadedRef.current) return;
+      retryIndex = 0;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      if (inFlight) {
+        retryAfterFlight = true;
+        return;
+      }
+      void attempt();
+    };
+
+    retryConfigRef.current = retryNow;
+    window.addEventListener("online", retryNow);
+    void attempt();
+
+    return () => {
+      cancelled = true;
+      retryConfigRef.current = () => {};
+      window.removeEventListener("online", retryNow);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [loadConfig]);
+
+  useEffect(() => {
+    const api = getApi();
+    let cancelled = false;
+    let settled = false;
+    let inFlight = false;
+    let retryAfterFlight = false;
+    let retryIndex = 0;
+    let loggedTransientFailure = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onAuthSuccess = (user: User) => {
       onLogin?.();
-      useAuthStore.setState({ user, isLoading: false });
+      useAuthStore.setState({
+        user,
+        isLoading: false,
+        status: "authenticated",
+        expired: false,
+      });
       identifyAnalytics(user.id, { email: user.email, name: user.name });
+      if (authRecoveryPendingRef.current) {
+        authRecoveryPendingRef.current = false;
+        // A network-not-ready boot can fail both auth and config requests;
+        // successful auth is a strong signal to accelerate config recovery.
+        retryConfigRef.current();
+      }
     };
 
-    const onAuthFailure = () => {
-      onLogout?.();
-      resetAnalytics();
-      useAuthStore.setState({ user: null, isLoading: false });
+    const rejectSession = () => {
+      settled = true;
+      window.removeEventListener("online", retryNow);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      // One teardown for every dead session, whether it died at boot or
+      // under a running shell. The api client's 401 hook has normally run
+      // this already by the time we get here; the action is idempotent.
+      useAuthStore.getState().sessionExpired();
     };
 
-    if (cookieAuth) {
-      // Cookie mode: the HttpOnly cookie is sent automatically by the browser.
-      // Call the API to check if the session is still valid.
-      //
-      // Seed the workspace list into React Query so the URL-driven layout can
-      // resolve the slug without a second fetch. The active workspace itself
-      // is derived from the URL by [workspaceSlug]/layout.tsx — no imperative
-      // selection here.
-      //
-      // Local/dev + Android WebView: cookie often missing on first open.
-      // Fall back to /auth/dev-login (JSON) so embedded boards auto-enter as
-      // dev@multica.local without a login form.
-      const seedSession = (user: User, wsList: Awaited<ReturnType<typeof api.listWorkspaces>>) => {
+    const scheduleRetry = (attempt: () => Promise<void>) => {
+      if (cancelled || settled) return;
+      const delay = RECOVERY_RETRY_DELAYS_MS[retryIndex];
+      retryIndex = Math.min(
+        retryIndex + 1,
+        RECOVERY_RETRY_DELAYS_MS.length - 1,
+      );
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        void attempt();
+      }, delay);
+    };
+
+    const warmWorkspaces = () => {
+      void qc.fetchQuery(workspaceListOptions()).catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          rejectSession();
+          return;
+        }
+        // Workspace consumers observe this query directly. React Query owns
+        // retries and refetch-on-reconnect independently from identity auth.
+        logger.error("workspace bootstrap failed", err);
+      });
+    };
+
+    const attempt = async (): Promise<void> => {
+      if (cancelled || settled || inFlight) return;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      inFlight = true;
+
+      try {
+        const user = await api.getMe();
+        if (cancelled) return;
+
+        // Identity verification and workspace loading are separate concerns
+        // on both platforms. Publish the verified user immediately; route and
+        // shell consumers own the shared workspace query and its recovery.
+        settled = true;
+        window.removeEventListener("online", retryNow);
         onAuthSuccess(user);
-        qc.setQueryData(workspaceKeys.list(), wsList);
-      };
-      Promise.all([api.getMe(), api.listWorkspaces()])
-        .then(([user, wsList]) => {
-          seedSession(user, wsList);
-        })
-        .catch((err) => {
-          logger.error("cookie auth init failed", err);
-          if (process.env.NODE_ENV === "development") {
-            api
-              .devLogin()
-              .then((res) => {
-                api.setToken(res.token);
-                storage.setItem("multica_token", res.token);
-                return Promise.all([api.getMe(), api.listWorkspaces()]);
-              })
-              .then(([user, wsList]) => {
-                seedSession(user, wsList);
-              })
-              .catch((devErr) => {
-                logger.error("dev auto-login after cookie failure failed", devErr);
-                onAuthFailure();
-              });
-            return;
-          }
-          onAuthFailure();
-        });
-      return;
-    }
+        warmWorkspaces();
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          rejectSession();
+          return;
+        }
 
-    // Token mode: read from localStorage (Electron / legacy).
-    const token = storage.getItem("multica_token");
-    if (!token) {
-      if (process.env.NODE_ENV === "development") {
-        api
-          .devLogin()
-          .then((res) => {
-            api.setToken(res.token);
-            storage.setItem("multica_token", res.token);
-            return Promise.all([api.getMe(), api.listWorkspaces()]);
-          })
-          .then(([user, wsList]) => {
-            onAuthSuccess(user);
-            qc.setQueryData(workspaceKeys.list(), wsList);
-          })
-          .catch((err) => {
-            logger.error("dev auto-login failed", err);
-            onAuthFailure();
-          });
+        if (!loggedTransientFailure) {
+          logger.error("auth init temporarily unavailable", err);
+          loggedTransientFailure = true;
+        }
+        authRecoveryPendingRef.current = true;
+        useAuthStore.setState({
+          user: null,
+          isLoading: true,
+          status: "recovering",
+        });
+        scheduleRetry(attempt);
+      } finally {
+        inFlight = false;
+        if (retryAfterFlight && !cancelled && !settled) {
+          retryAfterFlight = false;
+          void attempt();
+        }
+      }
+    };
+
+    const retryNow = () => {
+      if (cancelled || settled) return;
+      retryIndex = 0;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      if (inFlight) {
+        retryAfterFlight = true;
         return;
       }
-      onLogout?.();
-      useAuthStore.setState({ isLoading: false });
-      return;
+      void attempt();
+    };
+
+    // TianYuan downstream (DO NOT push upstream): the Android WebView embed
+    // always boots as dev@multica.local — never a login form. The native shell
+    // may also inject a ready session via window.__tianyuanSeedSession after
+    // fetching the token itself, bypassing this boot sequence entirely.
+    if (
+      typeof navigator !== "undefined" &&
+      /TianYuanAndroidMultica/.test(navigator.userAgent)
+    ) {
+      settled = true;
+      useAuthStore.setState({ isLoading: true });
+      const seed = (
+        user: User,
+        wsList: Awaited<ReturnType<typeof api.listWorkspaces>>,
+        token?: string,
+      ) => {
+        if (token) {
+          api.setToken(token);
+          storage.setItem("multica_token", token);
+        }
+        onAuthSuccess(user);
+        qc.setQueryData(workspaceKeys.list(), wsList);
+        // Pin the primary local workspace so the embed never waits on the
+        // !workspace gate.
+        const preferred =
+          wsList.find((w) => w.slug === "workspace") ?? wsList[0] ?? null;
+        if (preferred) {
+          setCurrentWorkspace(preferred.slug, preferred.id);
+        }
+      };
+
+      const boot = (token: string | null) =>
+        token
+          ? api
+              .getMe()
+              .then((user) =>
+                api
+                  .listWorkspaces()
+                  .then((wsList) => ({ user, wsList, token })),
+              )
+          : api.devLogin().then((res) => {
+              api.setToken(res.token);
+              storage.setItem("multica_token", res.token);
+              return Promise.all([api.getMe(), api.listWorkspaces()]).then(
+                ([user, wsList]) => ({ user, wsList, token: res.token }),
+              );
+            });
+
+      // Exposed for the Android WebView shell: it fetches a token natively
+      // and injects the session directly, without depending on boot timing.
+      if (typeof window !== "undefined") {
+        (
+          window as unknown as {
+            __tianyuanSeedSession?: (p: {
+              token: string;
+              user: User;
+              workspaces: Awaited<ReturnType<typeof api.listWorkspaces>>;
+            }) => void;
+          }
+        ).__tianyuanSeedSession = (p) => {
+          seed(p.user, p.workspaces, p.token);
+        };
+      }
+
+      boot(storage.getItem("multica_token"))
+        .then(({ user, wsList, token }) => seed(user, wsList, token ?? undefined))
+        .catch((err) => {
+          logger.error("tianyuan webview boot failed, retrying dev-login", err);
+          boot(null)
+            .then(({ user, wsList, token }) =>
+              seed(user, wsList, token ?? undefined),
+            )
+            .catch((err2) => {
+              logger.error("tianyuan webview dev auto-login failed", err2);
+              useAuthStore.setState({ user: null, isLoading: false });
+            });
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
-    api.setToken(token);
+    if (!cookieAuth) {
+      const token = storage.getItem("multica_token");
+      if (!token) {
+        // No credential to verify. Same published state as a rejected one,
+        // and the same teardown — which on desktop is what keeps a daemon
+        // running across the restart after an expiry, instead of the app
+        // treating a missing token as if the user had signed out.
+        settled = true;
+        useAuthStore.getState().sessionExpired();
+      } else {
+        api.setToken(token);
+        window.addEventListener("online", retryNow);
+        void attempt();
+      }
+    } else {
+      window.addEventListener("online", retryNow);
+      void attempt();
+    }
 
-    Promise.all([api.getMe(), api.listWorkspaces()])
-      .then(([user, wsList]) => {
-        onAuthSuccess(user);
-        // Seed React Query cache so the URL-driven layout can resolve the
-        // slug without a second fetch.
-        qc.setQueryData(workspaceKeys.list(), wsList);
-      })
-      .catch((err) => {
-        logger.error("auth init failed", err);
-        api.setToken(null);
-        setCurrentWorkspace(null, null);
-        storage.removeItem("multica_token");
-        onAuthFailure();
-      });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", retryNow);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retryGeneration]);
+
+  // A session that ends leaves its whole client side behind: a warmed query
+  // cache whose every entry has `staleTime: Infinity`, per-workspace drafts
+  // and chat selection, the desktop tab layout. The screen it lands on offers
+  // a login form, and the next person to use it is not guaranteed to be the
+  // one who was just signed in — on a shared machine a colleague would inherit
+  // all of it, and sharing a workspace with them means the tab validator finds
+  // nothing to drop. So an expiry erases exactly what a logout erases; only
+  // the auth teardown differs (the auth store's `sessionExpired`), plus what
+  // belongs to a process outliving the session — Desktop's daemon.
+  //
+  // Keyed on being unauthenticated rather than on a transition out of
+  // `authenticated`, because the case that leaks worst never passes through
+  // `authenticated` at all: the app starts, the stale token on disk is
+  // rejected at the identity probe, and the previous session's drafts sit
+  // there waiting for whoever signs in next.
+  //
+  // This cannot sign anyone out. Reaching `unauthenticated` IS the decision to
+  // end the session, and only two things reach it: a 401 on a credential we
+  // presented, or having no credential at all. A client that cannot reach the
+  // server — offline, DNS down, 5xx — settles on `recovering` and keeps both
+  // its token and everything below (see `attempt`'s catch, which narrows to
+  // `ApiError` with status 401 before rejecting anything).
+  const authStatus = useAuthStore((state) => state.status);
+  const clearedForThisSession = useRef(false);
+  useEffect(() => {
+    if (authStatus === "authenticated") {
+      clearedForThisSession.current = false;
+      return;
+    }
+    if (authStatus !== "unauthenticated" || clearedForThisSession.current) {
+      return;
+    }
+    clearedForThisSession.current = true;
+    clearClientSessionData(qc, storage);
+  }, [authStatus, qc, storage]);
 
   return <>{children}</>;
 }

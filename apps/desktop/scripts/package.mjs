@@ -27,6 +27,7 @@
 // real `git describe` invocation against a throwaway repo.
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -349,9 +350,6 @@ export function builderArgsForTarget(
     builderArgs.push("-c.publish.channel=latest-arm64");
   }
   if (target.platform === "mac" && target.arch === "x64") {
-    // Scope the Electron 39 platform floor to the new Intel package so this
-    // change does not rewrite established Apple Silicon bundle metadata.
-    builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
     builderArgs.push("-c.publish.channel=latest-x64");
   }
   return builderArgs;
@@ -364,6 +362,17 @@ function main() {
   console.log(
     `[package] build matrix → ${buildMatrix.map(formatTarget).join(", ")}`,
   );
+
+  // Step 0: start every release from an empty output directory. Stale
+  // artifacts from a prior run would otherwise be repacked into this run's
+  // app.asar (see the `!dist/**` note in electron-builder.yml). This clean
+  // is belt-and-braces only — it does NOT by itself prevent the same-run
+  // cross-arch contamination that broke the Intel DMG, because the first
+  // arch writes into dist/ mid-run before the next arch is packaged; the
+  // `!dist/**` files exclusion is what actually guarantees isolation.
+  const distDir = resolve(desktopRoot, "dist");
+  rmSync(distDir, { recursive: true, force: true });
+  console.log(`[package] cleaned output dir → ${distDir}`);
 
   // Step 1: build the Electron main/preload/renderer bundles. Without
   // this step electron-builder silently packages whatever is already in
